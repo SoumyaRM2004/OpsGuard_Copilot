@@ -1,2 +1,2 @@
-# OpsGuard_AI
+#OpsGuard-Copilot
 Agentic AI copilot for private operational knowledge, incident troubleshooting, and evidence-grounded responses.
