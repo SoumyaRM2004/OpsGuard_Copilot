@@ -13,3 +13,20 @@ button,textarea,input{font:inherit}.noise{position:fixed;inset:0;pointer-events:
 @media(max-width:760px){body{overflow:auto}.shell{display:block;height:auto}.rail{display:none}.workspace{height:100vh}.topbar{padding:20px 16px 14px}.topbar h1{font-size:23px}.engine-pill{display:none}.metrics{padding:0 16px 12px;grid-template-columns:repeat(2,1fr)}.metrics small{display:none}.console{margin:0 12px 12px}.message-body{max-width:90%}.starters{display:none}}
 
 .session-actions{display:flex;align-items:center;gap:10px}.new-session-btn{border:1px solid var(--line);background:transparent;color:var(--muted);padding:7px 10px;border-radius:8px;font:600 11px 'JetBrains Mono',monospace;cursor:pointer}.new-session-btn:hover{color:var(--text);border-color:var(--accent)}.tag.memory{border-color:rgba(155,126,255,.38);background:rgba(155,126,255,.08)}
+
+.file-list-wrap{margin-top:10px;display:flex;flex-direction:column;gap:6px}
+.file-list-header{display:flex;align-items:center;justify-content:space-between;padding:0 2px}
+.selected-count{font-family:"JetBrains Mono",monospace;font-size:9.5px;color:var(--lime);letter-spacing:.04em;font-weight:600}
+.clear-all-btn{background:transparent;border:0;color:#6d807d;font-family:"JetBrains Mono",monospace;font-size:9px;cursor:pointer;padding:2px 5px;border-radius:4px;transition:.15s}
+.clear-all-btn:hover{color:#ff7d7d;background:rgba(255,125,125,.1)}
+.file-list{display:flex;flex-direction:column;gap:5px;max-height:165px;overflow-y:auto;padding-right:2px;scrollbar-width:thin;scrollbar-color:#2a3634 transparent}
+.file-card{display:grid;grid-template-columns:22px 1fr 20px;align-items:center;gap:8px;background:rgba(18,25,24,.85);border:1px solid #23312e;border-radius:7px;padding:6px 8px;transition:border-color .15s,background .15s}
+.file-card:hover{border-color:#384b47;background:#151e1d}
+.file-card-icon{width:22px;height:22px;border-radius:5px;background:#121a19;border:1px solid #263834;display:flex;align-items:center;justify-content:center;color:var(--lime);flex-shrink:0}
+.file-card-icon svg{width:11px;height:11px;stroke:currentColor}
+.file-card-info{min-width:0;display:flex;flex-direction:column;gap:1px}
+.file-card-name{font-size:11px;font-weight:500;color:#e1ece9;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.file-card-meta{font-family:"JetBrains Mono",monospace;font-size:8.5px;color:#788c88;display:flex;gap:6px;align-items:center}
+.file-card-tag{text-transform:uppercase;color:var(--cyan);letter-spacing:.05em}
+.file-card-remove{width:20px;height:20px;border:0;background:transparent;color:#5a6d69;border-radius:4px;cursor:pointer;display:grid;place-items:center;font-size:13px;line-height:1;transition:all .15s;padding:0}
+.file-card-remove:hover{color:#ff7d7d;background:rgba(255,125,125,.14)}

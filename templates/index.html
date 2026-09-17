@@ -29,12 +29,19 @@
         <div class="eyebrow">PRIVATE KNOWLEDGE</div>
         <h3>Runbook Vault</h3>
         <p>Upload and append SOPs, postmortems, architecture notes and troubleshooting guides to the existing Pinecone knowledge base.</p>
+        <input id="fileInput" type="file" accept=".pdf,.txt,.md,.docx" multiple style="display:none;" />
         <label class="dropzone" for="fileInput">
-          <input id="fileInput" type="file" accept=".pdf,.txt,.md,.docx" />
           <span class="upload-icon">⇧</span>
-          <strong id="fileLabel">Choose runbook</strong>
+          <strong id="fileLabel">Choose runbook(s)</strong>
           <small>PDF · TXT · MD · DOCX</small>
         </label>
+        <div id="fileListWrap" class="file-list-wrap" style="display:none;">
+          <div class="file-list-header">
+            <span id="selectedCount" class="selected-count">0 runbooks selected</span>
+            <button type="button" id="clearAllBtn" class="clear-all-btn" title="Clear all">Clear</button>
+          </div>
+          <div id="fileList" class="file-list"></div>
+        </div>
         <button id="uploadBtn" class="secondary-btn">Add to knowledge base</button>
         <div id="uploadStatus" class="status"></div>
       </section>
@@ -96,6 +103,6 @@
       </section>
     </main>
   </div>
-<script src="/static/app.js"></script>
+<script src="/static/app.js?v=3"></script>
 </body>
 </html>

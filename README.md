@@ -1,10 +1,6 @@
 # 🛡️ OpsGuard — Enterprise Incident Response Self-RAG Copilot
 
 <p align="center">
-  <img src="pictures/ProjectRealArchitecture1.png" alt="OpsGuard System Architecture" width="900" />
-</p>
-
-<p align="center">
   <strong>Agentic Incident-Response & SRE Copilot Powered by Self-Reflective RAG (Self-RAG), LangGraph Persistent Memory, Pinecone Vector Indexing, Groq LLM Inference, and Tavily Internet Fallback.</strong>
 </p>
 
@@ -62,10 +58,6 @@ OpsGuard implements **Self-RAG (Self-Reflective Retrieval-Augmented Generation)*
 
 In mission-critical cloud infrastructure, standard (naive) RAG introduces catastrophic operational risks:
 
-<p align="center">
-  <img src="pictures/BasicRagLimitation.png" alt="Naive RAG Limitations" width="850" />
-</p>
-
 | Traditional / Naive RAG Issue | Real-World Production Impact | How OpsGuard Solves It |
 | :--- | :--- | :--- |
 | **Always-Retrieve Bias** | Queries like *"What is a CIDR block?"* waste latency and fetch irrelevant runbooks. | **Retrieval Routing**: Evaluates whether internal documents are genuinely required or if direct LLM knowledge suffices. |
@@ -79,33 +71,13 @@ In mission-critical cloud infrastructure, standard (naive) RAG introduces catast
 
 ## 💡 The Solution: Self-Reflective RAG (Self-RAG)
 
-<p align="center">
-  <img src="pictures/SelfRag.png" alt="Self-RAG Overview" width="750" />
-</p>
-
 OpsGuard adopts the foundational principles of Self-RAG, injecting explicit reflection tokens and self-evaluative loops into the generation lifecycle:
-
-<p align="center">
-  <img src="pictures/SelfRagBehaviour.png" alt="Self-RAG Behavioral Lifecycle" width="850" />
-</p>
 
 ---
 
 ## 🏗️ System Architecture & Visual Diagrams
 
-### 1. High-Level Operations Architecture
-<p align="center">
-  <img src="pictures/architecture.png" alt="Architecture Overview" width="850" />
-</p>
-
-### 2. Comprehensive Component & Technology Stack
-<p align="center">
-  <img src="pictures/Techstack.png" alt="OpsGuard Tech Stack" width="850" />
-</p>
-
-<p align="center">
-  <img src="pictures/selfragtech.png" alt="Self-RAG Engine Stack" width="850" />
-</p>
+The core architecture combines FastAPI, LangGraph Self-RAG agent workflow, Pinecone vector store, Groq LLM inference, and Tavily internet fallback. See the decision flow below for the detailed graph architecture.
 
 ---
 
