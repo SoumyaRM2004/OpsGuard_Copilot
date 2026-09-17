@@ -1,8 +1,13 @@
 from typing import List, TypedDict, Literal, Annotated
 import operator
 import sqlite3
+import time
+import re
+import logging
+import asyncio
 from pathlib import Path
 
+import groq
 from pydantic import BaseModel, Field
 from langchain_core.documents import Document
 from langchain_core.prompts import ChatPromptTemplate
@@ -69,13 +74,160 @@ class QueryRewrite(BaseModel):
     query: str
 
 
+logger = logging.getLogger(__name__)
+
+
+class GroqRateLimitExhaustedError(RuntimeError):
+    """Raised when Groq API rate limit is reached and bounded retries are exhausted."""
+    pass
+
+
+def is_rate_limit_error(e: Exception) -> bool:
+    """Detect Groq HTTP 429 / rate-limit errors."""
+    if isinstance(e, groq.RateLimitError):
+        return True
+    if getattr(e, "status_code", None) == 429:
+        return True
+    resp = getattr(e, "response", None)
+    if resp is not None and getattr(resp, "status_code", None) == 429:
+        return True
+    cause = getattr(e, "__cause__", None) or getattr(e, "__context__", None)
+    if cause is not None and cause is not e and is_rate_limit_error(cause):
+        return True
+    msg = str(e).lower()
+    return "429" in msg or "rate limit" in msg or "rate_limit" in msg or "too many requests" in msg
+
+
+def _parse_duration_seconds(val: str, is_ms: bool = False) -> float | None:
+    """Safely parse duration string like '2.5', '2s', '500ms', '1m' into float seconds."""
+    if not val:
+        return None
+    val_str = str(val).strip().lower()
+    if is_ms:
+        try:
+            return float(val_str) / 1000.0
+        except ValueError:
+            pass
+    m = re.match(r"^(\d+(?:\.\d+)?)\s*(ms|s|m)?$", val_str)
+    if m:
+        num = float(m.group(1))
+        unit = (m.group(2) or "s").lower()
+        if unit == "ms":
+            return num / 1000.0
+        elif unit == "m":
+            return num * 60.0
+        return num
+    try:
+        return float(val_str)
+    except ValueError:
+        return None
+
+
+def _get_retry_after(e: Exception, default: float = 2.0) -> float:
+    """Extract retry-after duration in seconds from Groq response headers or error message."""
+    response = getattr(e, "response", None)
+    if response is not None and hasattr(response, "headers"):
+        headers = response.headers
+        ra = headers.get("retry-after")
+        if ra:
+            sec = _parse_duration_seconds(ra)
+            if sec is not None:
+                return max(0.5, min(sec, 10.0))
+        ra_ms = headers.get("retry-after-ms")
+        if ra_ms:
+            sec = _parse_duration_seconds(ra_ms, is_ms=True)
+            if sec is not None:
+                return max(0.5, min(sec, 10.0))
+        ra_reset = headers.get("x-ratelimit-reset-requests")
+        if ra_reset:
+            sec = _parse_duration_seconds(ra_reset)
+            if sec is not None:
+                return max(0.5, min(sec, 10.0))
+
+    msg = str(e)
+    m = re.search(r"(?:try again in|retry after|wait)\s+(\d+(?:\.\d+)?)\s*(ms|s|m)?", msg, re.IGNORECASE)
+    if m:
+        val = float(m.group(1))
+        unit = (m.group(2) or "s").lower()
+        if unit == "ms":
+            sec = val / 1000.0
+        elif unit == "m":
+            sec = val * 60.0
+        else:
+            sec = val
+        return max(0.5, min(sec, 10.0))
+    return default
+
+
+class RateLimitedChatGroq(ChatGroq):
+    """ChatGroq with bounded retry handling for HTTP 429 RateLimitErrors."""
+
+    max_rate_limit_retries: int = 2
+
+    def _generate(self, messages, stop=None, run_manager=None, **kwargs):
+        attempts = 0
+        while True:
+            try:
+                return super()._generate(messages, stop=stop, run_manager=run_manager, **kwargs)
+            except Exception as e:
+                if not is_rate_limit_error(e):
+                    raise
+                attempts += 1
+                if attempts > self.max_rate_limit_retries:
+                    logger.warning(
+                        "Groq rate limit (HTTP 429) retries exhausted after %d attempts: %s",
+                        attempts,
+                        e,
+                    )
+                    raise GroqRateLimitExhaustedError(
+                        f"Groq API rate limit reached after {attempts} attempts. {e}"
+                    ) from e
+
+                wait_sec = _get_retry_after(e, default=2.0 * attempts)
+                logger.info(
+                    "Groq rate limit (HTTP 429) hit. Waiting %.2fs before retry %d/%d...",
+                    wait_sec,
+                    attempts,
+                    self.max_rate_limit_retries,
+                )
+                time.sleep(wait_sec)
+
+    async def _agenerate(self, messages, stop=None, run_manager=None, **kwargs):
+        attempts = 0
+        while True:
+            try:
+                return await super()._agenerate(messages, stop=stop, run_manager=run_manager, **kwargs)
+            except Exception as e:
+                if not is_rate_limit_error(e):
+                    raise
+                attempts += 1
+                if attempts > self.max_rate_limit_retries:
+                    logger.warning(
+                        "Groq rate limit (HTTP 429) retries exhausted after %d attempts: %s",
+                        attempts,
+                        e,
+                    )
+                    raise GroqRateLimitExhaustedError(
+                        f"Groq API rate limit reached after {attempts} attempts. {e}"
+                    ) from e
+
+                wait_sec = _get_retry_after(e, default=2.0 * attempts)
+                logger.info(
+                    "Groq rate limit (HTTP 429) hit. Waiting %.2fs before retry %d/%d...",
+                    wait_sec,
+                    attempts,
+                    self.max_rate_limit_retries,
+                )
+                await asyncio.sleep(wait_sec)
+
+
 def _llm():
     s = get_settings()
 
     if not s.groq_api_key:
         raise RuntimeError("GROQ_API_KEY is not configured")
 
-    return ChatGroq(
+    return RateLimitedChatGroq(
         api_key=s.groq_api_key,
         model=s.groq_model,
         temperature=0,
@@ -123,6 +275,7 @@ def _memory_text(state: RAGState, limit: int = 4) -> str:
 
 
 def contextualize_question(state: RAGState):
+    t0 = time.perf_counter()
     history = _memory_text(state)
 
     user_question = (
@@ -131,11 +284,12 @@ def contextualize_question(state: RAGState):
     )
 
     if not state.get("memory"):
+        dt = time.perf_counter() - t0
         return {
             "question": user_question,
             "trace": _trace(
                 state,
-                "Memory: new incident session"
+                f"Memory: new incident session ({dt:.2f}s)"
             )
         }
 
@@ -165,17 +319,19 @@ def contextualize_question(state: RAGState):
             question=user_question
         )
     )
+    dt = time.perf_counter() - t0
 
     return {
         "question": out.query,
         "trace": _trace(
             state,
-            f"Memory contextualized question: {out.query}"
+            f"Memory contextualized question: {out.query} ({dt:.2f}s)"
         )
     }
 
 
 def commit_memory(state: RAGState):
+    t0 = time.perf_counter()
     user_question = (
         state.get("user_question")
         or state.get("question", "")
@@ -188,17 +344,19 @@ def commit_memory(state: RAGState):
         f"User: {user_question}\n"
         f"Assistant ({route}): {answer}"
     )
+    dt = time.perf_counter() - t0
 
     return {
         "memory": [entry],
         "trace": _trace(
             state,
-            "SQLite memory checkpoint updated"
+            f"SQLite memory checkpoint updated ({dt:.2f}s)"
         )
     }
 
 
 def decide_retrieval(state: RAGState):
+    t0 = time.perf_counter()
     prompt = ChatPromptTemplate.from_messages([
         (
             "system",
@@ -258,12 +416,13 @@ Do not answer the question."""
     raw = response.content.strip().upper()
 
     should_retrieve = raw.startswith("TRUE")
+    dt = time.perf_counter() - t0
 
     return {
         "need_retrieval": should_retrieve,
         "trace": _trace(
             state,
-            f"Retrieval decision: {should_retrieve}"
+            f"Retrieval decision: {should_retrieve} ({dt:.2f}s)"
         )
     }
 
@@ -279,6 +438,7 @@ def route_after_decide(
 
 
 def generate_direct(state: RAGState):
+    t0 = time.perf_counter()
     prompt = ChatPromptTemplate.from_messages([
         (
             "system",
@@ -298,18 +458,20 @@ def generate_direct(state: RAGState):
             question=state["question"]
         )
     ).content
+    dt = time.perf_counter() - t0
 
     return {
         "answer": ans,
         "source_mode": "direct",
         "trace": _trace(
             state,
-            "Generated direct answer"
+            f"Generated direct answer ({dt:.2f}s)"
         )
     }
 
 
 def retrieve_internal(state: RAGState):
+    t0 = time.perf_counter()
     q = (
         state.get("retrieval_query")
         or state["question"]
@@ -322,6 +484,7 @@ def retrieve_internal(state: RAGState):
             **(d.metadata or {}),
             "source_type": "internal"
         }
+    dt = time.perf_counter() - t0
 
     return {
         "docs": docs,
@@ -329,12 +492,13 @@ def retrieve_internal(state: RAGState):
         "source_mode": "internal",
         "trace": _trace(
             state,
-            f"Internal retrieval: {len(docs)} chunks"
+            f"Internal retrieval: {len(docs)} chunks ({dt:.2f}s)"
         )
     }
 
 
 def grade_relevance(state: RAGState):
+    t0 = time.perf_counter()
     prompt = ChatPromptTemplate.from_messages([
         (
             "system",
@@ -374,13 +538,14 @@ def grade_relevance(state: RAGState):
             continue
 
     mode = state.get("source_mode", "internal")
+    dt = time.perf_counter() - t0
 
     return {
         "relevant_docs": relevant,
         "trace": _trace(
             state,
             f"Relevance grade ({mode}): "
-            f"{len(relevant)}/{len(state.get('docs', []))} relevant"
+            f"{len(relevant)}/{len(state.get('docs', []))} relevant ({dt:.2f}s)"
         )
     }
 
@@ -419,6 +584,7 @@ def route_after_relevance(
 
 
 def rewrite_internal_query(state: RAGState):
+    t0 = time.perf_counter()
     prompt = ChatPromptTemplate.from_messages([
         (
             "system",
@@ -448,6 +614,7 @@ def rewrite_internal_query(state: RAGState):
             )
         )
     )
+    dt = time.perf_counter() - t0
 
     return {
         "retrieval_query": out.query,
@@ -458,12 +625,13 @@ def rewrite_internal_query(state: RAGState):
         "relevant_docs": [],
         "trace": _trace(
             state,
-            f"Rewrote internal query: {out.query}"
+            f"Rewrote internal query: {out.query} ({dt:.2f}s)"
         )
     }
 
 
 def rewrite_web_query(state: RAGState):
+    t0 = time.perf_counter()
     prompt = ChatPromptTemplate.from_messages([
         (
             "system",
@@ -491,6 +659,7 @@ def rewrite_web_query(state: RAGState):
             )
         )
     )
+    dt = time.perf_counter() - t0
 
     return {
         "web_query": out.query,
@@ -501,23 +670,24 @@ def rewrite_web_query(state: RAGState):
         "relevant_docs": [],
         "trace": _trace(
             state,
-            f"Prepared internet search query: {out.query}"
+            f"Prepared internet search query: {out.query} ({dt:.2f}s)"
         )
     }
 
 
 def web_search(state: RAGState):
+    t0 = time.perf_counter()
     s = get_settings()
 
     if not s.tavily_api_key:
+        dt = time.perf_counter() - t0
         return {
             "docs": [],
             "source_mode": "web",
             "used_web_search": True,
             "trace": _trace(
                 state,
-                "Internet search unavailable: "
-                "TAVILY_API_KEY missing"
+                f"Internet search unavailable: TAVILY_API_KEY missing ({dt:.2f}s)"
             )
         }
 
@@ -553,6 +723,7 @@ def web_search(state: RAGState):
                 },
             )
         )
+    dt = time.perf_counter() - t0
 
     return {
         "docs": docs,
@@ -560,12 +731,13 @@ def web_search(state: RAGState):
         "used_web_search": True,
         "trace": _trace(
             state,
-            f"Internet search: {len(docs)} results"
+            f"Internet search: {len(docs)} results ({dt:.2f}s)"
         )
     }
 
 
 def generate_from_context(state: RAGState):
+    t0 = time.perf_counter()
     context = _format_context(
         state.get("relevant_docs", [])
     )
@@ -598,6 +770,7 @@ def generate_from_context(state: RAGState):
             context=context
         )
     ).content
+    dt = time.perf_counter() - t0
 
     return {
         "answer": ans,
@@ -606,12 +779,13 @@ def generate_from_context(state: RAGState):
         "trace": _trace(
             state,
             f"Generated answer from "
-            f"{state.get('source_mode', '')} evidence"
+            f"{state.get('source_mode', '')} evidence ({dt:.2f}s)"
         )
     }
 
 
 def check_support(state: RAGState):
+    t0 = time.perf_counter()
     prompt = ChatPromptTemplate.from_messages([
         (
             "system",
@@ -640,13 +814,14 @@ def check_support(state: RAGState):
             context=state.get("context", "")
         )
     )
+    dt = time.perf_counter() - t0
 
     return {
         "support_status": out.status,
         "evidence": out.evidence,
         "trace": _trace(
             state,
-            f"Support check: {out.status}"
+            f"Support check: {out.status} ({dt:.2f}s)"
         )
     }
 
@@ -668,6 +843,7 @@ def route_after_support(
 
 
 def revise_answer(state: RAGState):
+    t0 = time.perf_counter()
     prompt = ChatPromptTemplate.from_messages([
         (
             "system",
@@ -692,6 +868,7 @@ def revise_answer(state: RAGState):
             context=state.get("context", "")
         )
     ).content
+    dt = time.perf_counter() - t0
 
     return {
         "answer": ans,
@@ -700,12 +877,13 @@ def revise_answer(state: RAGState):
         ),
         "trace": _trace(
             state,
-            "Revised answer for grounding"
+            f"Revised answer for grounding ({dt:.2f}s)"
         )
     }
 
 
 def check_usefulness(state: RAGState):
+    t0 = time.perf_counter()
     prompt = ChatPromptTemplate.from_messages([
         (
             "system",
@@ -730,13 +908,14 @@ def check_usefulness(state: RAGState):
             answer=state.get("answer", "")
         )
     )
+    dt = time.perf_counter() - t0
 
     return {
         "usefulness": out.status,
         "use_reason": out.reason,
         "trace": _trace(
             state,
-            f"Usefulness check: {out.status}"
+            f"Usefulness check: {out.status} ({dt:.2f}s)"
         )
     }
 
@@ -1054,6 +1233,7 @@ def run_self_rag(
     question: str,
     thread_id: str
 ) -> dict:
+    t_start = time.perf_counter()
 
     global _graph
 
@@ -1101,15 +1281,60 @@ def run_self_rag(
         "trace": [],
     }
 
-    result = _graph.invoke(
-        initial,
-        config={
-            "configurable": {
-                "thread_id": thread_id
-            },
-            "recursion_limit": 60
+    try:
+        result = _graph.invoke(
+            initial,
+            config={
+                "configurable": {
+                    "thread_id": thread_id
+                },
+                "recursion_limit": 60
+            }
+        )
+    except (GroqRateLimitExhaustedError, groq.RateLimitError):
+        total_elapsed = time.perf_counter() - t_start
+        return {
+            "answer": (
+                "OpsGuard is temporarily experiencing high traffic with the AI model provider (Groq rate limit reached). "
+                "Please wait a moment and submit your incident question again."
+            ),
+            "route": "Rate Limit Exceeded",
+            "used_web_search": False,
+            "support_status": "rate_limited",
+            "usefulness": "rate_limited",
+            "sources": [],
+            "trace": [
+                "Groq API rate limit reached (HTTP 429). Maximum retries exhausted.",
+                f"Total Self-RAG latency: {total_elapsed:.2f}s",
+            ],
+            "thread_id": thread_id,
+            "memory_turns": 0,
         }
-    )
+    except Exception as e:
+        if is_rate_limit_error(e):
+            total_elapsed = time.perf_counter() - t_start
+            return {
+                "answer": (
+                    "OpsGuard is temporarily experiencing high traffic with the AI model provider (Groq rate limit reached). "
+                    "Please wait a moment and submit your incident question again."
+                ),
+                "route": "Rate Limit Exceeded",
+                "used_web_search": False,
+                "support_status": "rate_limited",
+                "usefulness": "rate_limited",
+                "sources": [],
+                "trace": [
+                    "Groq API rate limit reached (HTTP 429). Maximum retries exhausted.",
+                    f"Total Self-RAG latency: {total_elapsed:.2f}s",
+                ],
+                "thread_id": thread_id,
+                "memory_turns": 0,
+            }
+        raise
+
+    total_elapsed = time.perf_counter() - t_start
+    final_trace = list(result.get("trace", []))
+    final_trace.append(f"Total Self-RAG latency: {total_elapsed:.2f}s")
 
     mode = result.get(
         "source_mode",
@@ -1155,10 +1380,7 @@ def run_self_rag(
             )
         ),
 
-        "trace": result.get(
-            "trace",
-            []
-        ),
+        "trace": final_trace,
 
         "thread_id": thread_id,
 

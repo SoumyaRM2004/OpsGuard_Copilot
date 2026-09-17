@@ -55,18 +55,115 @@ async function ask(){
 send.addEventListener('click',ask);
 q.addEventListener('keydown',e=>{if(e.key==='Enter'&&!e.shiftKey){e.preventDefault();ask();}});
 starters.addEventListener('click',e=>{const b=e.target.closest('button[data-q]');if(!b)return;q.value=b.dataset.q;q.focus();});
-fileInput.addEventListener('change',()=>{fileLabel.textContent=fileInput.files[0]?.name||'Choose runbook';uploadStatus.textContent='';});
+const fileListWrap = document.getElementById('fileListWrap');
+const fileList = document.getElementById('fileList');
+const selectedCount = document.getElementById('selectedCount');
+const clearAllBtn = document.getElementById('clearAllBtn');
+let selectedFiles = [];
+
+function formatSize(bytes){
+  if(!bytes || bytes === 0) return '0 B';
+  const k = 1024;
+  const sizes = ['B', 'KB', 'MB', 'GB'];
+  const i = Math.floor(Math.log(bytes) / Math.log(k));
+  return parseFloat((bytes / Math.pow(k, i)).toFixed(1)) + ' ' + sizes[i];
+}
+
+function getFileExt(name = ''){
+  const ext = name.split('.').pop();
+  return ext ? ext.toUpperCase() : 'DOC';
+}
+
+function renderSelectedFiles(){
+  if(!fileList || !fileListWrap) return;
+  if(selectedFiles.length === 0){
+    fileListWrap.style.display = 'none';
+    fileList.innerHTML = '';
+    fileLabel.textContent = 'Choose runbook(s)';
+    return;
+  }
+  fileListWrap.style.display = 'flex';
+  selectedCount.textContent = `${selectedFiles.length} runbook${selectedFiles.length === 1 ? '' : 's'} selected`;
+  fileLabel.textContent = `${selectedFiles.length} runbook${selectedFiles.length === 1 ? '' : 's'} chosen`;
+
+  fileList.innerHTML = selectedFiles.map((f, i) => {
+    const ext = getFileExt(f.name);
+    const size = formatSize(f.size);
+    return `<div class="file-card">
+      <div class="file-card-icon">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+          <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"></path>
+          <polyline points="14 2 14 8 20 8"></polyline>
+        </svg>
+      </div>
+      <div class="file-card-info">
+        <div class="file-card-name" title="${esc(f.name)}">${esc(f.name)}</div>
+        <div class="file-card-meta">
+          <span class="file-card-tag">${esc(ext)}</span>
+          <span>·</span>
+          <span>${esc(size)}</span>
+        </div>
+      </div>
+      <button type="button" class="file-card-remove" data-index="${i}" title="Remove ${esc(f.name)}">✕</button>
+    </div>`;
+  }).join('');
+}
+
+fileInput.addEventListener('change',()=>{
+  const newFiles = Array.from(fileInput.files || []);
+  newFiles.forEach(nf => {
+    if(!selectedFiles.some(f => f.name === nf.name && f.size === nf.size && f.lastModified === nf.lastModified)){
+      selectedFiles.push(nf);
+    }
+  });
+  uploadStatus.textContent = '';
+  renderSelectedFiles();
+});
+
+fileList?.addEventListener('click', (e) => {
+  const btn = e.target.closest('.file-card-remove');
+  if(!btn) return;
+  const idx = parseInt(btn.dataset.index, 10);
+  if(!isNaN(idx) && idx >= 0 && idx < selectedFiles.length){
+    selectedFiles.splice(idx, 1);
+    uploadStatus.textContent = '';
+    renderSelectedFiles();
+  }
+});
+
+clearAllBtn?.addEventListener('click', () => {
+  selectedFiles = [];
+  fileInput.value = '';
+  uploadStatus.textContent = '';
+  renderSelectedFiles();
+});
 
 upload.addEventListener('click',async()=>{
-  const file=fileInput.files[0]; if(!file){uploadStatus.textContent='Choose a runbook first.';return;}
-  upload.disabled=true; uploadStatus.textContent='Indexing private operational knowledge…';
+  if(!selectedFiles || selectedFiles.length === 0){
+    uploadStatus.textContent = 'Choose runbook(s) first.';
+    return;
+  }
+  upload.disabled = true;
+  uploadStatus.textContent = `Indexing ${selectedFiles.length} document${selectedFiles.length === 1 ? '' : 's'} into private operational knowledge…`;
   try{
-    const fd=new FormData();fd.append('file',file);
-    const r=await fetch('/api/upload',{method:'POST',body:fd});const d=await r.json();
-    if(!r.ok)throw new Error(d.detail||'Upload failed');
-    uploadStatus.textContent=`✓ ${d.chunks_indexed} chunks indexed in ${d.namespace}`;
-  }catch(e){uploadStatus.textContent='Error: '+e.message;}
-  finally{upload.disabled=false;}
+    const fd = new FormData();
+    for(let i = 0; i < selectedFiles.length; i++){
+      fd.append('files', selectedFiles[i]);
+    }
+    const r = await fetch('/api/upload', {method: 'POST', body: fd});
+    const d = await r.json();
+    if(!r.ok) throw new Error(d.detail || 'Upload failed');
+    const totalFiles = d.total_files ?? d.results?.length ?? selectedFiles.length;
+    const totalChunks = d.chunks_indexed ?? 0;
+    uploadStatus.textContent = `✓ ${totalFiles} file${totalFiles === 1 ? '' : 's'} (${totalChunks} chunks) indexed in ${d.namespace}`;
+    selectedFiles = [];
+    fileInput.value = '';
+    renderSelectedFiles();
+  }catch(e){
+    uploadStatus.textContent = 'Error: ' + e.message;
+  }finally{
+    upload.disabled = false;
+  }
 });
 
 
@@ -74,7 +171,7 @@ newSessionBtn?.addEventListener('click',()=>{
   threadId = newThreadId();
   localStorage.setItem(THREAD_KEY, threadId);
   renderSession();
-  messages.innerHTML = `<div class="message assistant"><div class="avatar">S</div><div class="message-body"><div class="message-label">CLOUDOPS SENTINEL</div><div class="bubble intro">New incident memory session started. Describe the production issue and I’ll build context across your follow-up questions.</div></div></div>`;
+  messages.innerHTML = `<div class="message assistant"><div class="avatar">S</div><div class="message-body"><div class="message-label">OpsGuard</div><div class="bubble intro">New incident memory session started. Describe the production issue and I’ll build context across your follow-up questions.</div></div></div>`;
   starters.style.display='flex';
   q.value=''; q.focus();
 });

@@ -1,11 +1,26 @@
+import sys
 from src.config import get_settings
 
-settings = get_settings()
 
-print("Pinecone API Key:", settings.pinecone_api_key)
-# print("Pinecone Index Name:", settings.pinecone_index_name)
-# print("Pinecone Namespace:", settings.pinecone_namespace)
-# print("Pinecone Cloud:", settings.pinecone_cloud)
-# print("Pinecone Region:", settings.pinecone_region)
-# print("Pinecone Embedding Model:", settings.pinecone_embedding_model)
+def validate_config() -> bool:
+    settings = get_settings()
 
+    checks = {
+        "Pinecone API Key": bool(settings.pinecone_api_key and settings.pinecone_api_key.strip()),
+        "Groq API Key": bool(settings.groq_api_key and settings.groq_api_key.strip()),
+        "Tavily API Key": bool(settings.tavily_api_key and settings.tavily_api_key.strip()),
+    }
+
+    all_valid = True
+    for label, is_configured in checks.items():
+        status = "configured" if is_configured else "missing"
+        print(f"{label}: {status}")
+        if not is_configured:
+            all_valid = False
+
+    return all_valid
+
+
+if __name__ == "__main__":
+    if not validate_config():
+        sys.exit(1)
