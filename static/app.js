@@ -86,7 +86,7 @@ function pretty(v = '') {
 
 /** Return the loading animation HTML shown while Self-RAG is running. */
 function loadingMarkup() {
-  return '<span class="thinking">Running Self-RAG <i></i><i></i><i></i></span>';
+  return '<span class="thinking">Running... <i></i><i></i><i></i></span>';
 }
 
 
