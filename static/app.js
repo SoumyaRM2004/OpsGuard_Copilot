@@ -51,7 +51,7 @@ renderSession();
  * Every user-generated string must pass through this before innerHTML insertion.
  */
 function esc(s = '') {
-  return String(s).replace(/[&<>"']/g, function (c) {
+  return String(s ?? '').replace(/[&<>"']/g, function (c) {
     return {
       '&': '&amp;',
       '<': '&lt;',
@@ -61,6 +61,8 @@ function esc(s = '') {
     }[c];
   });
 }
+
+const escapeHtml = esc;
 
 /** Format bytes into human-readable size (e.g., "1.5 MB"). */
 function formatSize(bytes) {
@@ -411,7 +413,7 @@ async function loadRunbooks() {
 
     renderRunbookTable(runbooksCache);
   } catch (err) {
-    tbody.innerHTML = `<tr><td colspan="5" class="empty-cell">Error loading runbooks: ${escapeHtml(err.message)}</td></tr>`;
+    tbody.innerHTML = `<tr><td colspan="5" class="empty-cell">Error loading runbooks: ${esc(err.message)}</td></tr>`;
   }
 }
 
@@ -425,15 +427,18 @@ function renderRunbookTable(docs) {
   }
 
   tbody.innerHTML = docs.map(d => {
-    const sizeKB = (d.size_bytes / 1024).toFixed(1) + ' KB';
+    const sizeKB = (((d && d.size_bytes) || 0) / 1024).toFixed(1) + ' KB';
+    const name = (d && d.name) || 'Untitled';
+    const cat = (d && d.category) || 'General';
+    const type = (d && d.type) || 'DOC';
     return `
       <tr>
-        <td><strong>${escapeHtml(d.name)}</strong></td>
-        <td><span class="badge">${escapeHtml(d.category)}</span></td>
-        <td><span class="badge badge-format">${escapeHtml(d.type)}</span></td>
+        <td><strong>${esc(name)}</strong></td>
+        <td><span class="badge">${esc(cat)}</span></td>
+        <td><span class="badge badge-format">${esc(type)}</span></td>
         <td>${sizeKB}</td>
         <td>
-          <button class="action-btn ask-doc-btn" data-doc="${escapeHtml(d.name)}">Ask Copilot</button>
+          <button class="action-btn ask-doc-btn" data-doc="${esc(name)}">Ask Copilot</button>
         </td>
       </tr>
     `;
@@ -473,6 +478,7 @@ let auditsCache = [];
 async function loadAudits() {
   const tbody = document.getElementById('auditTableBody');
   const refreshBtn = document.getElementById('refreshAuditsBtn');
+
   if (refreshBtn) {
     refreshBtn.disabled = true;
     refreshBtn.innerHTML = '<span class="spin-icon">↻</span> Refreshing…';
@@ -489,13 +495,13 @@ async function loadAudits() {
     });
     if (!res.ok) throw new Error(`HTTP ${res.status}: Failed to fetch audit records`);
     const data = await res.json();
-    auditsCache = data || [];
+    auditsCache = Array.isArray(data) ? data : [];
 
     // Calculate metrics
     const total = auditsCache.length;
-    const internal = auditsCache.filter(a => a.route === 'Private Runbooks').length;
-    const web = auditsCache.filter(a => a.used_web || a.route === 'Internet Search').length;
-    const supported = auditsCache.filter(a => !a.support_status || a.support_status === 'fully_supported').length;
+    const internal = auditsCache.filter(a => a && a.route === 'Private Runbooks').length;
+    const web = auditsCache.filter(a => a && (a.used_web || a.route === 'Internet Search')).length;
+    const supported = auditsCache.filter(a => a && (!a.support_status || a.support_status === 'fully_supported')).length;
     const verifiedPct = total > 0 ? Math.round((supported / total) * 100) : 100;
 
     const totalEl = document.getElementById('auditTotalMetric');
@@ -513,26 +519,41 @@ async function loadAudits() {
     if (refreshBtn) {
       refreshBtn.innerHTML = `✓ Refreshed (${total})`;
       setTimeout(() => {
-        refreshBtn.innerHTML = '↻ Refresh Logs';
-        refreshBtn.disabled = false;
-      }, 1200);
+        if (refreshBtn) {
+          refreshBtn.innerHTML = '↻ Refresh Logs';
+          refreshBtn.disabled = false;
+        }
+      }, 1000);
     }
   } catch (err) {
+    console.error('Audit load error:', err);
     if (tbody) {
-      tbody.innerHTML = `<tr><td colspan="6" class="empty-cell">Error loading audit records: ${escapeHtml(err.message)}</td></tr>`;
+      tbody.innerHTML = `<tr><td colspan="6" class="empty-cell">Error loading audit records: ${esc(err.message)}</td></tr>`;
     }
     if (refreshBtn) {
       refreshBtn.innerHTML = '⚠ Refresh Failed';
       setTimeout(() => {
-        refreshBtn.innerHTML = '↻ Refresh Logs';
-        refreshBtn.disabled = false;
+        if (refreshBtn) {
+          refreshBtn.innerHTML = '↻ Refresh Logs';
+          refreshBtn.disabled = false;
+        }
       }, 2000);
     }
+  } finally {
+    // Fail-safe to ensure button is never stuck
+    setTimeout(() => {
+      if (refreshBtn && refreshBtn.disabled) {
+        refreshBtn.innerHTML = '↻ Refresh Logs';
+        refreshBtn.disabled = false;
+      }
+    }, 2500);
   }
 }
 
 function filterAndRenderAudits() {
   const tbody = document.getElementById('auditTableBody');
+  if (!tbody) return;
+
   const searchInput = document.getElementById('auditSearchInput');
   const routeSelect = document.getElementById('auditRouteFilter');
 
@@ -540,11 +561,12 @@ function filterAndRenderAudits() {
   const routeFilter = routeSelect ? routeSelect.value : 'all';
 
   const filtered = auditsCache.filter(a => {
+    if (!a) return false;
     const matchesRoute = routeFilter === 'all' || a.route === routeFilter;
-    const matchesSearch = !term ||
-      (a.question && a.question.toLowerCase().includes(term)) ||
-      (a.answer && a.answer.toLowerCase().includes(term)) ||
-      (a.sources_json && a.sources_json.toLowerCase().includes(term));
+    const qStr = String(a.question || '').toLowerCase();
+    const ansStr = String(a.answer || '').toLowerCase();
+    const srcStr = String(a.sources_json || '').toLowerCase();
+    const matchesSearch = !term || qStr.includes(term) || ansStr.includes(term) || srcStr.includes(term);
     return matchesRoute && matchesSearch;
   });
 
@@ -564,17 +586,19 @@ function filterAndRenderAudits() {
       sources = JSON.parse(a.sources_json || '[]');
     } catch (_) {}
 
-    const sourceText = sources.length > 0
+    const sourceText = Array.isArray(sources) && sources.length > 0
       ? sources.map(s => s.title || s.source || 'Doc').slice(0, 2).join(', ') + (sources.length > 2 ? ` (+${sources.length - 2})` : '')
       : 'None';
 
+    const qText = String(a.question || '');
+
     return `
       <tr>
-        <td style="color: var(--muted); font-family: 'JetBrains Mono', monospace; font-size: 11px;">${escapeHtml(timeStr)}</td>
-        <td><strong>${escapeHtml(a.question.slice(0, 75))}${a.question.length > 75 ? '…' : ''}</strong></td>
-        <td><span class="badge ${routeBadgeClass}">${escapeHtml(a.route || 'Runbooks')}</span></td>
-        <td><span class="badge badge-format">${escapeHtml(pretty(a.support_status || 'fully_supported'))}</span></td>
-        <td style="color: var(--muted);">${escapeHtml(sourceText)}</td>
+        <td style="color: var(--muted); font-family: 'JetBrains Mono', monospace; font-size: 11px;">${esc(timeStr)}</td>
+        <td><strong>${esc(qText.slice(0, 75))}${qText.length > 75 ? '…' : ''}</strong></td>
+        <td><span class="badge ${routeBadgeClass}">${esc(a.route || 'Runbooks')}</span></td>
+        <td><span class="badge badge-format">${esc(pretty(a.support_status || 'fully_supported'))}</span></td>
+        <td style="color: var(--muted);">${esc(sourceText)}</td>
         <td>
           <button class="action-btn inspect-audit-btn" data-id="${a.id}">Inspect</button>
         </td>
@@ -585,7 +609,7 @@ function filterAndRenderAudits() {
   tbody.querySelectorAll('.inspect-audit-btn').forEach(btn => {
     btn.addEventListener('click', function () {
       const id = parseInt(this.getAttribute('data-id'), 10);
-      const record = auditsCache.find(r => r.id === id);
+      const record = auditsCache.find(r => r && r.id === id);
       if (record) openAuditModal(record);
     });
   });
@@ -614,7 +638,7 @@ const closeAuditModalBtn = document.getElementById('closeAuditModalBtn');
 const modalContent = document.getElementById('modalContent');
 
 function openAuditModal(record) {
-  if (!auditDetailModal || !modalContent) return;
+  if (!auditDetailModal || !modalContent || !record) return;
 
   let trace = [];
   try {
@@ -628,35 +652,35 @@ function openAuditModal(record) {
 
   modalContent.innerHTML = `
     <h4>Incident Question</h4>
-    <div style="font-weight: 600; font-size: 14px; margin-bottom: 14px;">${escapeHtml(record.question)}</div>
+    <div style="font-weight: 600; font-size: 14px; margin-bottom: 14px;">${esc(record.question || '')}</div>
 
     <h4>Self-RAG Routing & Evidence</h4>
     <div style="display: flex; gap: 8px; flex-wrap: wrap; margin-bottom: 14px;">
-      <span class="badge badge-route-runbooks">Route: ${escapeHtml(record.route || 'Runbooks')}</span>
-      <span class="badge badge-format">Support: ${escapeHtml(pretty(record.support_status || 'verified'))}</span>
-      <span class="badge badge-format">Usefulness: ${escapeHtml(pretty(record.usefulness || 'useful'))}</span>
+      <span class="badge badge-route-runbooks">Route: ${esc(record.route || 'Runbooks')}</span>
+      <span class="badge badge-format">Support: ${esc(pretty(record.support_status || 'verified'))}</span>
+      <span class="badge badge-format">Usefulness: ${esc(pretty(record.usefulness || 'useful'))}</span>
     </div>
 
     <h4>Copilot Answer</h4>
-    <pre>${escapeHtml(record.answer)}</pre>
+    <pre>${esc(record.answer || '')}</pre>
 
-    ${sources.length > 0 ? `
+    ${Array.isArray(sources) && sources.length > 0 ? `
       <h4>Sources Cited (${sources.length})</h4>
       <div style="margin-bottom: 14px;">
         ${sources.map(s => `
           <div style="padding: 6px 10px; background: #0c1212; border: 1px solid var(--line); border-radius: 6px; margin-bottom: 6px; font-size: 11px;">
-            <strong>${escapeHtml(s.title || s.source || 'Doc')}</strong>
+            <strong>${esc(s.title || s.source || 'Doc')}</strong>
             ${s.page ? ` · Page ${s.page}` : ''}
-            ${s.url ? ` · <a href="${escapeHtml(s.url)}" target="_blank" style="color: var(--cyan); text-decoration: none;">Link</a>` : ''}
+            ${s.url ? ` · <a href="${esc(s.url)}" target="_blank" style="color: var(--cyan); text-decoration: none;">Link</a>` : ''}
           </div>
         `).join('')}
       </div>
     ` : ''}
 
-    ${trace.length > 0 ? `
+    ${Array.isArray(trace) && trace.length > 0 ? `
       <h4>Execution Trace Steps (${trace.length})</h4>
       <div>
-        ${trace.map(t => `<div class="trace-step-item">→ ${escapeHtml(t)}</div>`).join('')}
+        ${trace.map(t => `<div class="trace-step-item">→ ${esc(t)}</div>`).join('')}
       </div>
     ` : ''}
   `;

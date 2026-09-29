@@ -1039,6 +1039,35 @@ button, textarea, input {
   background: rgba(185, 255, 85, .05);
 }
 
+.refresh-btn {
+  background: #111717;
+  border: 1px solid var(--line);
+  color: var(--text);
+  font-weight: 600;
+  font-size: 12px;
+  padding: 8px 16px;
+  border-radius: 8px;
+  cursor: pointer;
+  white-space: nowrap;
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  transition: all .15s ease;
+  width: auto;
+  margin: 0;
+}
+
+.refresh-btn:hover {
+  border-color: var(--lime);
+  color: var(--lime);
+  background: rgba(185, 255, 85, .08);
+}
+
+.refresh-btn:disabled {
+  opacity: .6;
+  cursor: not-allowed;
+}
+
 /* ─── Audit Detail Modal ─────────────────────────────────────────── */
 
 .audit-modal-backdrop {
