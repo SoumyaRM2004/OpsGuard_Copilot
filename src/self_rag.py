@@ -2,6 +2,7 @@
 
 import time
 import logging
+import sqlite3
 from typing import List
 from pathlib import Path
 
@@ -173,14 +174,15 @@ def build_graph():
     g.add_edge("no_answer", "commit_memory")
     g.add_edge("commit_memory", END)
 
-    # SQLite persistent memory (Fix 7: thread-safe connection)
+    # SQLite persistent memory (thread-safe connection)
     db_path = (
         Path(__file__).resolve().parents[1]
         / "data"
         / "langgraph_memory.sqlite"
     )
     db_path.parent.mkdir(parents=True, exist_ok=True)
-    checkpointer = SqliteSaver.from_conn_string(str(db_path))
+    conn = sqlite3.connect(str(db_path), check_same_thread=False)
+    checkpointer = SqliteSaver(conn)
 
     return g.compile(checkpointer=checkpointer)
 
