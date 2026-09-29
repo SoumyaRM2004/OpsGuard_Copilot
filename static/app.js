@@ -359,3 +359,292 @@ if (newSessionBtn) {
     q.focus();
   });
 }
+
+
+// ─── Multi-View Navigation ──────────────────────────────────────────
+
+const navItems = document.querySelectorAll('.nav-item');
+const viewPanes = document.querySelectorAll('.view-pane');
+
+function switchView(viewName) {
+  navItems.forEach(btn => {
+    btn.classList.toggle('active', btn.getAttribute('data-view') === viewName);
+  });
+  viewPanes.forEach(pane => {
+    pane.classList.toggle('active', pane.id === ('view' + viewName.charAt(0).toUpperCase() + viewName.slice(1)));
+  });
+
+  if (viewName === 'runbooks') {
+    loadRunbooks();
+  } else if (viewName === 'audits') {
+    loadAudits();
+  }
+}
+
+navItems.forEach(btn => {
+  btn.addEventListener('click', function () {
+    const view = this.getAttribute('data-view');
+    if (view) switchView(view);
+  });
+});
+
+
+// ─── Runbook Vault Catalog ──────────────────────────────────────────
+
+let runbooksCache = [];
+
+async function loadRunbooks() {
+  const tbody = document.getElementById('runbookTableBody');
+  const countMetric = document.getElementById('vaultCountMetric');
+  if (!tbody) return;
+
+  tbody.innerHTML = '<tr><td colspan="5" class="loading-cell">Loading documents catalog…</td></tr>';
+
+  try {
+    const res = await fetch('/api/runbooks');
+    const data = await res.json();
+    runbooksCache = data.runbooks || [];
+
+    if (countMetric) {
+      countMetric.textContent = `${runbooksCache.length} Document${runbooksCache.length === 1 ? '' : 's'}`;
+    }
+
+    renderRunbookTable(runbooksCache);
+  } catch (err) {
+    tbody.innerHTML = `<tr><td colspan="5" class="empty-cell">Error loading runbooks: ${escapeHtml(err.message)}</td></tr>`;
+  }
+}
+
+function renderRunbookTable(docs) {
+  const tbody = document.getElementById('runbookTableBody');
+  if (!tbody) return;
+
+  if (!docs || docs.length === 0) {
+    tbody.innerHTML = '<tr><td colspan="5" class="empty-cell">No documents found. Upload SOPs or runbooks to populate.</td></tr>';
+    return;
+  }
+
+  tbody.innerHTML = docs.map(d => {
+    const sizeKB = (d.size_bytes / 1024).toFixed(1) + ' KB';
+    return `
+      <tr>
+        <td><strong>${escapeHtml(d.name)}</strong></td>
+        <td><span class="badge">${escapeHtml(d.category)}</span></td>
+        <td><span class="badge badge-format">${escapeHtml(d.type)}</span></td>
+        <td>${sizeKB}</td>
+        <td>
+          <button class="action-btn ask-doc-btn" data-doc="${escapeHtml(d.name)}">Ask Copilot</button>
+        </td>
+      </tr>
+    `;
+  }).join('');
+
+  tbody.querySelectorAll('.ask-doc-btn').forEach(btn => {
+    btn.addEventListener('click', function () {
+      const docName = this.getAttribute('data-doc');
+      switchView('copilot');
+      q.value = `What are the key operational procedures and response steps outlined in ${docName}?`;
+      q.focus();
+    });
+  });
+}
+
+const runbookSearchInput = document.getElementById('runbookSearchInput');
+if (runbookSearchInput) {
+  runbookSearchInput.addEventListener('input', function () {
+    const term = this.value.trim().toLowerCase();
+    const filtered = runbooksCache.filter(d =>
+      d.name.toLowerCase().includes(term) || d.type.toLowerCase().includes(term) || d.category.toLowerCase().includes(term)
+    );
+    renderRunbookTable(filtered);
+  });
+}
+
+const vaultUploadBtn = document.getElementById('vaultUploadBtn');
+if (vaultUploadBtn && fileInput) {
+  vaultUploadBtn.addEventListener('click', () => fileInput.click());
+}
+
+
+// ─── Audit Trail ────────────────────────────────────────────────────
+
+let auditsCache = [];
+
+async function loadAudits() {
+  const tbody = document.getElementById('auditTableBody');
+  if (!tbody) return;
+
+  tbody.innerHTML = '<tr><td colspan="6" class="loading-cell">Loading audit trail records…</td></tr>';
+
+  try {
+    const res = await fetch('/api/audits?limit=50');
+    const data = await res.json();
+    auditsCache = data || [];
+
+    // Calculate metrics
+    const total = auditsCache.length;
+    const internal = auditsCache.filter(a => a.route === 'Private Runbooks').length;
+    const web = auditsCache.filter(a => a.used_web || a.route === 'Internet Search').length;
+    const supported = auditsCache.filter(a => !a.support_status || a.support_status === 'fully_supported').length;
+    const verifiedPct = total > 0 ? Math.round((supported / total) * 100) : 100;
+
+    const totalEl = document.getElementById('auditTotalMetric');
+    const runbooksEl = document.getElementById('auditRunbooksMetric');
+    const webEl = document.getElementById('auditWebMetric');
+    const verifiedEl = document.getElementById('auditVerifiedMetric');
+
+    if (totalEl) totalEl.textContent = `${total} Queries`;
+    if (runbooksEl) runbooksEl.textContent = `${internal} Runbooks`;
+    if (webEl) webEl.textContent = `${web} Fallbacks`;
+    if (verifiedEl) verifiedEl.textContent = `${verifiedPct}%`;
+
+    filterAndRenderAudits();
+  } catch (err) {
+    tbody.innerHTML = `<tr><td colspan="6" class="empty-cell">Error loading audit records: ${escapeHtml(err.message)}</td></tr>`;
+  }
+}
+
+function filterAndRenderAudits() {
+  const tbody = document.getElementById('auditTableBody');
+  const searchInput = document.getElementById('auditSearchInput');
+  const routeSelect = document.getElementById('auditRouteFilter');
+
+  const term = (searchInput ? searchInput.value : '').trim().toLowerCase();
+  const routeFilter = routeSelect ? routeSelect.value : 'all';
+
+  const filtered = auditsCache.filter(a => {
+    const matchesRoute = routeFilter === 'all' || a.route === routeFilter;
+    const matchesSearch = !term ||
+      (a.question && a.question.toLowerCase().includes(term)) ||
+      (a.answer && a.answer.toLowerCase().includes(term)) ||
+      (a.sources_json && a.sources_json.toLowerCase().includes(term));
+    return matchesRoute && matchesSearch;
+  });
+
+  if (!filtered || filtered.length === 0) {
+    tbody.innerHTML = '<tr><td colspan="6" class="empty-cell">No matching audit records found.</td></tr>';
+    return;
+  }
+
+  tbody.innerHTML = filtered.map(a => {
+    const timeStr = a.created_at ? new Date(a.created_at).toLocaleString() : 'N/A';
+    let routeBadgeClass = 'badge-route-runbooks';
+    if (a.route === 'Internet Search') routeBadgeClass = 'badge-route-web';
+    else if (a.route === 'General Knowledge') routeBadgeClass = 'badge-route-direct';
+
+    let sources = [];
+    try {
+      sources = JSON.parse(a.sources_json || '[]');
+    } catch (_) {}
+
+    const sourceText = sources.length > 0
+      ? sources.map(s => s.title || s.source || 'Doc').slice(0, 2).join(', ') + (sources.length > 2 ? ` (+${sources.length - 2})` : '')
+      : 'None';
+
+    return `
+      <tr>
+        <td style="color: var(--muted); font-family: 'JetBrains Mono', monospace; font-size: 11px;">${escapeHtml(timeStr)}</td>
+        <td><strong>${escapeHtml(a.question.slice(0, 75))}${a.question.length > 75 ? '…' : ''}</strong></td>
+        <td><span class="badge ${routeBadgeClass}">${escapeHtml(a.route || 'Runbooks')}</span></td>
+        <td><span class="badge badge-format">${escapeHtml(pretty(a.support_status || 'fully_supported'))}</span></td>
+        <td style="color: var(--muted);">${escapeHtml(sourceText)}</td>
+        <td>
+          <button class="action-btn inspect-audit-btn" data-id="${a.id}">Inspect</button>
+        </td>
+      </tr>
+    `;
+  }).join('');
+
+  tbody.querySelectorAll('.inspect-audit-btn').forEach(btn => {
+    btn.addEventListener('click', function () {
+      const id = parseInt(this.getAttribute('data-id'), 10);
+      const record = auditsCache.find(r => r.id === id);
+      if (record) openAuditModal(record);
+    });
+  });
+}
+
+const auditSearchInput = document.getElementById('auditSearchInput');
+if (auditSearchInput) {
+  auditSearchInput.addEventListener('input', filterAndRenderAudits);
+}
+
+const auditRouteFilter = document.getElementById('auditRouteFilter');
+if (auditRouteFilter) {
+  auditRouteFilter.addEventListener('change', filterAndRenderAudits);
+}
+
+const refreshAuditsBtn = document.getElementById('refreshAuditsBtn');
+if (refreshAuditsBtn) {
+  refreshAuditsBtn.addEventListener('click', loadAudits);
+}
+
+
+// ─── Audit Modal Inspector ──────────────────────────────────────────
+
+const auditDetailModal = document.getElementById('auditDetailModal');
+const closeAuditModalBtn = document.getElementById('closeAuditModalBtn');
+const modalContent = document.getElementById('modalContent');
+
+function openAuditModal(record) {
+  if (!auditDetailModal || !modalContent) return;
+
+  let trace = [];
+  try {
+    trace = JSON.parse(record.trace_json || '[]');
+  } catch (_) {}
+
+  let sources = [];
+  try {
+    sources = JSON.parse(record.sources_json || '[]');
+  } catch (_) {}
+
+  modalContent.innerHTML = `
+    <h4>Incident Question</h4>
+    <div style="font-weight: 600; font-size: 14px; margin-bottom: 14px;">${escapeHtml(record.question)}</div>
+
+    <h4>Self-RAG Routing & Evidence</h4>
+    <div style="display: flex; gap: 8px; flex-wrap: wrap; margin-bottom: 14px;">
+      <span class="badge badge-route-runbooks">Route: ${escapeHtml(record.route || 'Runbooks')}</span>
+      <span class="badge badge-format">Support: ${escapeHtml(pretty(record.support_status || 'verified'))}</span>
+      <span class="badge badge-format">Usefulness: ${escapeHtml(pretty(record.usefulness || 'useful'))}</span>
+    </div>
+
+    <h4>Copilot Answer</h4>
+    <pre>${escapeHtml(record.answer)}</pre>
+
+    ${sources.length > 0 ? `
+      <h4>Sources Cited (${sources.length})</h4>
+      <div style="margin-bottom: 14px;">
+        ${sources.map(s => `
+          <div style="padding: 6px 10px; background: #0c1212; border: 1px solid var(--line); border-radius: 6px; margin-bottom: 6px; font-size: 11px;">
+            <strong>${escapeHtml(s.title || s.source || 'Doc')}</strong>
+            ${s.page ? ` · Page ${s.page}` : ''}
+            ${s.url ? ` · <a href="${escapeHtml(s.url)}" target="_blank" style="color: var(--cyan); text-decoration: none;">Link</a>` : ''}
+          </div>
+        `).join('')}
+      </div>
+    ` : ''}
+
+    ${trace.length > 0 ? `
+      <h4>Execution Trace Steps (${trace.length})</h4>
+      <div>
+        ${trace.map(t => `<div class="trace-step-item">→ ${escapeHtml(t)}</div>`).join('')}
+      </div>
+    ` : ''}
+  `;
+
+  auditDetailModal.style.display = 'flex';
+}
+
+if (closeAuditModalBtn && auditDetailModal) {
+  closeAuditModalBtn.addEventListener('click', () => {
+    auditDetailModal.style.display = 'none';
+  });
+
+  auditDetailModal.addEventListener('click', (e) => {
+    if (e.target === auditDetailModal) {
+      auditDetailModal.style.display = 'none';
+    }
+  });
+}

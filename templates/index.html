@@ -7,7 +7,7 @@
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600;700&family=JetBrains+Mono:wght@500;600&display=swap" rel="stylesheet">
-  <link rel="stylesheet" href="/static/style.css" />
+  <link rel="stylesheet" href="/static/style.css?v=5" />
 </head>
 <body>
   <div class="noise"></div>
@@ -20,9 +20,9 @@
 
       <div class="rail-label">CONTROL CENTER</div>
       <nav class="nav">
-        <button class="nav-item active"><span>◈</span> Incident Copilot</button>
-        <button class="nav-item"><span>▱</span> Runbook Vault</button>
-        <button class="nav-item"><span>⌁</span> Audit Trail</button>
+        <button class="nav-item active" data-view="copilot" id="navCopilot"><span>◈</span> Incident Copilot</button>
+        <button class="nav-item" data-view="runbooks" id="navRunbooks"><span>▱</span> Runbook Vault</button>
+        <button class="nav-item" data-view="audits" id="navAudits"><span>⌁</span> Audit Trail</button>
       </nav>
 
       <section class="upload-panel">
@@ -53,56 +53,171 @@
     </aside>
 
     <main class="workspace">
-      <header class="topbar">
-        <div>
-          <div class="eyebrow">PRODUCTION RELIABILITY</div>
-          <h1>Incident Response Console</h1>
-          <p>Ground every troubleshooting decision in private operational evidence — or verified internet context when the runbooks fall short.</p>
-        </div>
-        <div class="engine-pill"><span class="pulse"></span> SELF-RAG ONLINE</div>
-      </header>
+      <!-- ─── View 1: Incident Copilot ──────────────────────────────── -->
+      <div id="viewCopilot" class="view-pane active">
+        <header class="topbar">
+          <div>
+            <div class="eyebrow">PRODUCTION RELIABILITY</div>
+            <h1>Incident Response Console</h1>
+            <p>Ground every troubleshooting decision in private operational evidence — or verified internet context when the runbooks fall short.</p>
+          </div>
+          <div class="engine-pill"><span class="pulse"></span> SELF-RAG ONLINE</div>
+        </header>
 
-      <section class="metrics">
-        <article><span>01</span><div><strong>Retrieve</strong><small>Private runbooks first</small></div></article>
-        <article><span>02</span><div><strong>Grade</strong><small>Keep relevant evidence</small></div></article>
-        <article><span>03</span><div><strong>Verify</strong><small>IsSUP + IsUSE</small></div></article>
-        <article><span>04</span><div><strong>Remember</strong><small>SQLite thread persistence</small></div></article>
-      </section>
+        <section class="metrics">
+          <article><span>01</span><div><strong>Retrieve</strong><small>Private runbooks first</small></div></article>
+          <article><span>02</span><div><strong>Grade</strong><small>Keep relevant evidence</small></div></article>
+          <article><span>03</span><div><strong>Verify</strong><small>IsSUP + IsUSE</small></div></article>
+          <article><span>04</span><div><strong>Remember</strong><small>SQLite thread persistence</small></div></article>
+        </section>
 
-      <section class="console">
-        <div class="console-head">
-          <div><span class="terminal-dot"></span><strong>INCIDENT SESSION</strong></div>
-          <div class="session-actions"><span id="sessionId" class="session-id">MEMORY / LIVE</span><button id="newSessionBtn" class="new-session-btn">New Session</button></div>
-        </div>
+        <section class="console">
+          <div class="console-head">
+            <div><span class="terminal-dot"></span><strong>INCIDENT SESSION</strong></div>
+            <div class="session-actions"><span id="sessionId" class="session-id">MEMORY / LIVE</span><button id="newSessionBtn" class="new-session-btn">New Session</button></div>
+          </div>
 
-        <div id="messages" class="messages">
-          <div class="message assistant">
-            <div class="avatar"></div>
-            <div class="message-body">
-              <div class="message-label">OpsGuard</div>
-              <div class="bubble intro">
-                Describe a production symptom, deployment failure, infrastructure alert, or cloud incident. I’ll remember this incident across follow-up questions, check private runbooks first, and use internet search only when internal evidence is insufficient.
+          <div id="messages" class="messages">
+            <div class="message assistant">
+              <div class="avatar">S</div>
+              <div class="message-body">
+                <div class="message-label">OpsGuard</div>
+                <div class="bubble intro">
+                  Describe a production symptom, deployment failure, infrastructure alert, or cloud incident. I’ll remember this incident across follow-up questions, check private runbooks first, and use internet search only when internal evidence is insufficient.
+                </div>
               </div>
             </div>
           </div>
-        </div>
 
-        <div id="starterPrompts" class="starters">
-          <button data-q="Our checkout API is returning 502 errors after deployment. What should the on-call engineer check first?">502 after deployment</button>
-          <button data-q="CPU on the payments service is above 90%. What is our recommended response procedure?">High CPU incident</button>
-          <button data-q="What should I verify when a Kubernetes pod keeps restarting with CrashLoopBackOff?">CrashLoopBackOff</button>
-        </div>
-
-        <div class="composer-wrap">
-          <div class="composer">
-            <textarea id="question" rows="2" placeholder="Describe the incident or ask an operations question..."></textarea>
-            <button id="sendBtn" title="Run Self-RAG">➜</button>
+          <div id="starterPrompts" class="starters">
+            <button data-q="Our checkout API is returning 502 errors after deployment. What should the on-call engineer check first?">502 after deployment</button>
+            <button data-q="CPU on the payments service is above 90%. What is our recommended response procedure?">High CPU incident</button>
+            <button data-q="What should I verify when a Kubernetes pod keeps restarting with CrashLoopBackOff?">CrashLoopBackOff</button>
           </div>
-          <div class="composer-note"><span>SQLite conversation memory enabled</span><span>•</span><span>Private evidence prioritized</span><span>•</span><span>Internet search activates only when needed</span></div>
-        </div>
-      </section>
+
+          <div class="composer-wrap">
+            <div class="composer">
+              <textarea id="question" rows="2" placeholder="Describe the incident or ask an operations question..."></textarea>
+              <button id="sendBtn" title="Run Self-RAG">➜</button>
+            </div>
+            <div class="composer-note"><span>SQLite conversation memory enabled</span><span>•</span><span>Private evidence prioritized</span><span>•</span><span>Internet search activates only when needed</span></div>
+          </div>
+        </section>
+      </div>
+
+      <!-- ─── View 2: Runbook Vault ─────────────────────────────────── -->
+      <div id="viewRunbooks" class="view-pane">
+        <header class="topbar">
+          <div>
+            <div class="eyebrow">PRIVATE KNOWLEDGE BASE</div>
+            <h1>Runbook Vault</h1>
+            <p>Inspect internal SOPs, incident playbooks, and architectural documentation indexed in the vector store.</p>
+          </div>
+          <div class="engine-pill"><span class="pulse"></span> PINECONE SYNCED</div>
+        </header>
+
+        <section class="metrics">
+          <article><span>01</span><div><strong id="vaultCountMetric">3 Documents</strong><small>Available in repository</small></div></article>
+          <article><span>02</span><div><strong>Namespace</strong><small>company-documents</small></div></article>
+          <article><span>03</span><div><strong>Embeddings</strong><small>llama-text-embed-v2</small></div></article>
+          <article><span>04</span><div><strong>Formats</strong><small>PDF · TXT · MD · DOCX</small></div></article>
+        </section>
+
+        <section class="vault-panel">
+          <div class="vault-toolbar">
+            <div class="vault-search-box">
+              <input type="text" id="runbookSearchInput" placeholder="Filter runbooks by title or type..." />
+            </div>
+            <button class="secondary-btn" id="vaultUploadBtn" type="button">⇧ Upload Document</button>
+          </div>
+
+          <div class="runbook-table-wrap">
+            <table class="runbook-table">
+              <thead>
+                <tr>
+                  <th>Document Name</th>
+                  <th>Category</th>
+                  <th>Format</th>
+                  <th>Size</th>
+                  <th>Action</th>
+                </tr>
+              </thead>
+              <tbody id="runbookTableBody">
+                <tr><td colspan="5" class="loading-cell">Loading documents catalog…</td></tr>
+              </tbody>
+            </table>
+          </div>
+        </section>
+      </div>
+
+      <!-- ─── View 3: Audit Trail ───────────────────────────────────── -->
+      <div id="viewAudits" class="view-pane">
+        <header class="topbar">
+          <div>
+            <div class="eyebrow">COMPLIANCE & TRACEABILITY</div>
+            <h1>Incident Audit Trail</h1>
+            <p>Immutable log of every incident troubleshooting interaction, routing decision, evidence citation, and verification score.</p>
+          </div>
+          <button class="secondary-btn" id="refreshAuditsBtn" type="button">↻ Refresh Logs</button>
+        </header>
+
+        <section class="metrics">
+          <article><span>01</span><div><strong id="auditTotalMetric">0 Queries</strong><small>Total audited interactions</small></div></article>
+          <article><span>02</span><div><strong id="auditRunbooksMetric">0 Runbooks</strong><small>Private runbook resolutions</small></div></article>
+          <article><span>03</span><div><strong id="auditWebMetric">0 Web Searches</strong><small>Fallback searches activated</small></div></article>
+          <article><span>04</span><div><strong id="auditVerifiedMetric">100%</strong><small>Hallucination-free verified</small></div></article>
+        </section>
+
+        <section class="audit-panel">
+          <div class="audit-toolbar">
+            <div class="audit-search-box">
+              <input type="text" id="auditSearchInput" placeholder="Filter audit records by question, answer or sources..." />
+            </div>
+            <select id="auditRouteFilter" class="audit-select">
+              <option value="all">All Routes</option>
+              <option value="Private Runbooks">Private Runbooks</option>
+              <option value="Internet Search">Internet Search</option>
+              <option value="General Knowledge">General Knowledge</option>
+              <option value="No Reliable Evidence">No Evidence</option>
+            </select>
+          </div>
+
+          <div class="audit-table-wrap">
+            <table class="audit-table">
+              <thead>
+                <tr>
+                  <th>Timestamp (UTC)</th>
+                  <th>Incident Question</th>
+                  <th>Route Taken</th>
+                  <th>Evidence Status</th>
+                  <th>Sources Cited</th>
+                  <th>Details</th>
+                </tr>
+              </thead>
+              <tbody id="auditTableBody">
+                <tr><td colspan="6" class="loading-cell">Loading audit trail records…</td></tr>
+              </tbody>
+            </table>
+          </div>
+        </section>
+      </div>
     </main>
   </div>
-<script src="/static/app.js?v=4"></script>
+
+  <!-- ─── Audit Detail Modal ─────────────────────────────────────────── -->
+  <div id="auditDetailModal" class="audit-modal-backdrop" style="display: none;">
+    <div class="audit-modal-card">
+      <div class="audit-modal-header">
+        <div>
+          <div class="eyebrow">SELF-RAG EXECUTION INSPECTOR</div>
+          <h3 id="modalTitle">Incident Audit Record</h3>
+        </div>
+        <button id="closeAuditModalBtn" class="modal-close-btn">&times;</button>
+      </div>
+      <div id="modalContent" class="audit-modal-body"></div>
+    </div>
+  </div>
+
+  <script src="/static/app.js?v=5"></script>
 </body>
 </html>

@@ -183,8 +183,29 @@ async def upload(
 
 
 @app.get("/api/audits")
-def audits(limit: int = 20):
+def audits(limit: int = 50):
     return latest_audits(min(max(limit, 1), 100))
+
+
+@app.get("/api/runbooks")
+def runbooks():
+    """Return catalog of available runbooks and documentation."""
+    docs = []
+    seen = set()
+    search_dirs = [ROOT / "documents", ROOT / "docs", UPLOADS]
+    for d in search_dirs:
+        if d.exists() and d.is_dir():
+            for p in sorted(d.iterdir()):
+                if p.is_file() and p.suffix.lower() in {".md", ".pdf", ".txt", ".docx"}:
+                    if p.name not in seen:
+                        seen.add(p.name)
+                        docs.append({
+                            "name": p.name,
+                            "category": "Runbook" if d.name == "documents" else ("Documentation" if d.name == "docs" else "Upload"),
+                            "size_bytes": p.stat().st_size,
+                            "type": p.suffix.lower().replace(".", "").upper(),
+                        })
+    return {"runbooks": docs}
 
 
 if __name__ == "__main__":
