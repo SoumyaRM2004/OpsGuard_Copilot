@@ -36,7 +36,15 @@ UPLOADS.mkdir(exist_ok=True)
 async def lifespan(app: FastAPI):
     """Startup: initialize database and vector store."""
     init_db()
-    get_vector_store()
+    try:
+        get_vector_store()
+        logger.info("Pinecone vector store initialized successfully.")
+    except Exception as exc:
+        logger.warning(
+            "Pinecone vector store initialization skipped at startup: %s. "
+            "Please ensure PINECONE_API_KEY is properly set in your .env file.",
+            exc,
+        )
     logger.info("OpsGuard ready — http://localhost:8080")
     yield
 
