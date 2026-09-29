@@ -4,10 +4,26 @@
 
 // ─── Session / Thread Management ────────────────────────────────────
 
+// ─── Multi-Tenant Workspace & Session Management ────────────────────
+
+const WORKSPACE_KEY = 'OpsGuard_workspace_token';
 const THREAD_KEY = 'OpsGuard_thread_id';
 
+function generateWorkspaceId() {
+  const rand = typeof crypto !== 'undefined' && crypto.randomUUID
+    ? crypto.randomUUID().replace(/-/g, '').slice(0, 12)
+    : Math.random().toString(36).slice(2, 14);
+  return 'usr_' + rand;
+}
+
+let workspaceId = localStorage.getItem(WORKSPACE_KEY);
+if (!workspaceId) {
+  workspaceId = generateWorkspaceId();
+  localStorage.setItem(WORKSPACE_KEY, workspaceId);
+}
+
 function newThreadId() {
-  return 'incident-' + crypto.randomUUID();
+  return 'incident-' + (typeof crypto !== 'undefined' && crypto.randomUUID ? crypto.randomUUID() : Math.random().toString(36).slice(2, 10));
 }
 
 let threadId = localStorage.getItem(THREAD_KEY) || newThreadId();
@@ -30,15 +46,19 @@ const fileListWrap = document.getElementById('fileListWrap');
 const fileList = document.getElementById('fileList');
 const selectedCount = document.getElementById('selectedCount');
 const clearAllBtn = document.getElementById('clearAllBtn');
+const workspaceChipId = document.getElementById('workspaceChipId');
 
 let selectedFiles = [];
 
 
-// ─── Session Display ────────────────────────────────────────────────
+// ─── Session & Workspace Display ────────────────────────────────────
 
 function renderSession() {
   if (sessionId) {
     sessionId.textContent = 'MEMORY / ' + threadId.slice(-8).toUpperCase();
+  }
+  if (workspaceChipId) {
+    workspaceChipId.textContent = workspaceId;
   }
 }
 renderSession();
@@ -137,8 +157,11 @@ async function ask() {
   try {
     const r = await fetch('/api/chat', {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ question, thread_id: threadId })
+      headers: {
+        'Content-Type': 'application/json',
+        'X-User-Id': workspaceId,
+      },
+      body: JSON.stringify({ question, thread_id: threadId, user_id: workspaceId })
     });
 
     const data = await r.json();
@@ -317,18 +340,23 @@ upload.addEventListener('click', async function () {
       fd.append('files', selectedFiles[i]);
     }
 
-    const r = await fetch('/api/upload', { method: 'POST', body: fd });
+    const r = await fetch('/api/upload', {
+      method: 'POST',
+      headers: { 'X-User-Id': workspaceId },
+      body: fd
+    });
     const d = await r.json();
     if (!r.ok) throw new Error(d.detail || 'Upload failed');
 
     const totalFiles = d.total_files ?? d.results?.length ?? selectedFiles.length;
     const totalChunks = d.chunks_indexed ?? 0;
     uploadStatus.textContent =
-      `✓ ${totalFiles} file${totalFiles === 1 ? '' : 's'} (${totalChunks} chunks) indexed in ${d.namespace}`;
+      `✓ ${totalFiles} file${totalFiles === 1 ? '' : 's'} (${totalChunks} chunks) indexed in private workspace ${d.namespace || workspaceId}`;
 
     selectedFiles = [];
     fileInput.value = '';
     renderSelectedFiles();
+    loadRunbooks();
 
   } catch (e) {
     uploadStatus.textContent = 'Error: ' + e.message;
@@ -403,7 +431,9 @@ async function loadRunbooks() {
   tbody.innerHTML = '<tr><td colspan="5" class="loading-cell">Loading documents catalog…</td></tr>';
 
   try {
-    const res = await fetch('/api/runbooks');
+    const res = await fetch('/api/runbooks', {
+      headers: { 'X-User-Id': workspaceId }
+    });
     const data = await res.json();
     runbooksCache = data.runbooks || [];
 
@@ -422,23 +452,30 @@ function renderRunbookTable(docs) {
   if (!tbody) return;
 
   if (!docs || docs.length === 0) {
-    tbody.innerHTML = '<tr><td colspan="5" class="empty-cell">No documents found. Upload SOPs or runbooks to populate.</td></tr>';
+    tbody.innerHTML = '<tr><td colspan="5" class="empty-cell">No documents found. Upload private SOPs or incident runbooks to populate.</td></tr>';
     return;
   }
 
   tbody.innerHTML = docs.map(d => {
     const sizeKB = (((d && d.size_bytes) || 0) / 1024).toFixed(1) + ' KB';
     const name = (d && d.name) || 'Untitled';
-    const cat = (d && d.category) || 'General';
+    const isUserOwned = Boolean(d && d.is_user_owned);
+    const cat = isUserOwned ? 'Private Upload' : ((d && d.category) || 'General');
+    const badgeClass = isUserOwned ? 'badge badge-private' : 'badge badge-system';
     const type = (d && d.type) || 'DOC';
+    const deleteBtn = isUserOwned
+      ? `<button class="delete-doc-btn" data-doc="${esc(name)}" title="Delete document from private workspace">🗑 Delete</button>`
+      : '';
+
     return `
       <tr>
         <td><strong>${esc(name)}</strong></td>
-        <td><span class="badge">${esc(cat)}</span></td>
+        <td><span class="${badgeClass}">${esc(cat)}</span></td>
         <td><span class="badge badge-format">${esc(type)}</span></td>
         <td>${sizeKB}</td>
         <td>
           <button class="action-btn ask-doc-btn" data-doc="${esc(name)}">Ask Copilot</button>
+          ${deleteBtn}
         </td>
       </tr>
     `;
@@ -450,6 +487,28 @@ function renderRunbookTable(docs) {
       switchView('copilot');
       q.value = `What are the key operational procedures and response steps outlined in ${docName}?`;
       q.focus();
+    });
+  });
+
+  tbody.querySelectorAll('.delete-doc-btn').forEach(btn => {
+    btn.addEventListener('click', async function (e) {
+      e.stopPropagation();
+      const docName = this.getAttribute('data-doc');
+      if (!confirm(`Delete "${docName}" from your private workspace?`)) return;
+      this.disabled = true;
+      this.textContent = 'Deleting…';
+      try {
+        const delRes = await fetch('/api/runbooks/' + encodeURIComponent(docName), {
+          method: 'DELETE',
+          headers: { 'X-User-Id': workspaceId }
+        });
+        if (!delRes.ok) throw new Error('Deletion failed');
+        await loadRunbooks();
+      } catch (err) {
+        alert('Error deleting document: ' + err.message);
+        this.disabled = false;
+        this.textContent = '🗑 Delete';
+      }
     });
   });
 }
@@ -491,7 +550,11 @@ async function loadAudits() {
   try {
     const res = await fetch('/api/audits?limit=50&_t=' + Date.now(), {
       cache: 'no-store',
-      headers: { 'Pragma': 'no-cache', 'Cache-Control': 'no-cache' }
+      headers: {
+        'Pragma': 'no-cache',
+        'Cache-Control': 'no-cache',
+        'X-User-Id': workspaceId,
+      }
     });
     if (!res.ok) throw new Error(`HTTP ${res.status}: Failed to fetch audit records`);
     const data = await res.json();
@@ -697,5 +760,83 @@ if (closeAuditModalBtn && auditDetailModal) {
     if (e.target === auditDetailModal) {
       auditDetailModal.style.display = 'none';
     }
+  });
+}
+
+
+// ─── Multi-Tenant Workspace Switcher & Token Controls ───────────────
+
+const copyWorkspaceBtn = document.getElementById('copyWorkspaceBtn');
+const switchWorkspaceBtn = document.getElementById('switchWorkspaceBtn');
+const workspaceModal = document.getElementById('workspaceModal');
+const closeWorkspaceModalBtn = document.getElementById('closeWorkspaceModalBtn');
+const modalCurrentToken = document.getElementById('modalCurrentToken');
+const modalCopyTokenBtn = document.getElementById('modalCopyTokenBtn');
+const switchTokenInput = document.getElementById('switchTokenInput');
+const confirmSwitchBtn = document.getElementById('confirmSwitchBtn');
+const createNewWorkspaceBtn = document.getElementById('createNewWorkspaceBtn');
+
+function copyTokenToClipboard(btn) {
+  if (!navigator.clipboard) return;
+  navigator.clipboard.writeText(workspaceId).then(() => {
+    const orig = btn.textContent;
+    btn.textContent = '✓ Copied!';
+    setTimeout(() => { btn.textContent = orig; }, 1500);
+  });
+}
+
+if (copyWorkspaceBtn) {
+  copyWorkspaceBtn.addEventListener('click', () => copyTokenToClipboard(copyWorkspaceBtn));
+}
+
+if (modalCopyTokenBtn) {
+  modalCopyTokenBtn.addEventListener('click', () => copyTokenToClipboard(modalCopyTokenBtn));
+}
+
+if (switchWorkspaceBtn && workspaceModal) {
+  switchWorkspaceBtn.addEventListener('click', () => {
+    if (modalCurrentToken) modalCurrentToken.value = workspaceId;
+    if (switchTokenInput) switchTokenInput.value = '';
+    workspaceModal.style.display = 'flex';
+  });
+}
+
+if (closeWorkspaceModalBtn && workspaceModal) {
+  closeWorkspaceModalBtn.addEventListener('click', () => {
+    workspaceModal.style.display = 'none';
+  });
+
+  workspaceModal.addEventListener('click', (e) => {
+    if (e.target === workspaceModal) {
+      workspaceModal.style.display = 'none';
+    }
+  });
+}
+
+if (confirmSwitchBtn && switchTokenInput) {
+  confirmSwitchBtn.addEventListener('click', () => {
+    const entered = switchTokenInput.value.trim();
+    if (!entered) {
+      alert('Please enter or paste a valid workspace token.');
+      return;
+    }
+    const clean = entered.replace(/[^a-zA-Z0-9_\-]/g, '');
+    if (!clean) {
+      alert('Invalid workspace token format.');
+      return;
+    }
+    localStorage.setItem(WORKSPACE_KEY, clean);
+    localStorage.removeItem(THREAD_KEY);
+    window.location.reload();
+  });
+}
+
+if (createNewWorkspaceBtn) {
+  createNewWorkspaceBtn.addEventListener('click', () => {
+    if (!confirm('Start a brand new workspace? Your current workspace token will remain saved, but this browser will switch to a fresh, isolated workspace.')) return;
+    const freshId = generateWorkspaceId();
+    localStorage.setItem(WORKSPACE_KEY, freshId);
+    localStorage.removeItem(THREAD_KEY);
+    window.location.reload();
   });
 }

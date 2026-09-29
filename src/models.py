@@ -7,6 +7,7 @@ from typing import List, Optional, Literal
 class ChatRequest(BaseModel):
     question: str = Field(..., min_length=2, max_length=2000)
     thread_id: str = Field(..., min_length=3, max_length=120)
+    user_id: Optional[str] = Field(None, max_length=120)
 
 
 class SourceItem(BaseModel):
@@ -27,3 +28,4 @@ class ChatResponse(BaseModel):
     trace: List[str] = []
     thread_id: str
     memory_turns: int = 0
+    user_id: Optional[str] = None

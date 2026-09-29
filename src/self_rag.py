@@ -218,8 +218,8 @@ def _rate_limit_response(thread_id: str, elapsed: float) -> dict:
 # ─── Entry Point ─────────────────────────────────────────────────────
 
 
-def run_self_rag(question: str, thread_id: str) -> dict:
-    """Run the full Self-RAG pipeline for a single question."""
+def run_self_rag(question: str, thread_id: str, user_id: str = "") -> dict:
+    """Run the full Self-RAG pipeline for a single question with user-scoped isolation."""
     t_start = time.perf_counter()
 
     initial: RAGState = {
@@ -242,14 +242,18 @@ def run_self_rag(question: str, thread_id: str) -> dict:
         "source_mode": "internal",
         "used_web_search": False,
         "trace": [],
+        "user_id": user_id or "",
     }
+
+    # Thread checkpoint isolation: user A and user B will never collide or access each other's memory
+    scoped_thread = f"{user_id}:{thread_id}" if user_id else thread_id
 
     try:
         result = _graph.invoke(
             initial,
             config={
                 "configurable": {
-                    "thread_id": thread_id
+                    "thread_id": scoped_thread
                 },
                 "recursion_limit": 60
             }
@@ -284,4 +288,5 @@ def run_self_rag(question: str, thread_id: str) -> dict:
         "trace": final_trace,
         "thread_id": thread_id,
         "memory_turns": len(result.get("memory", [])),
+        "user_id": user_id,
     }

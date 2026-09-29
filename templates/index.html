@@ -7,7 +7,7 @@
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600;700&family=JetBrains+Mono:wght@500;600&display=swap" rel="stylesheet">
-  <link rel="stylesheet" href="/static/style.css?v=7" />
+  <link rel="stylesheet" href="/static/style.css?v=8" />
 </head>
 <body>
   <div class="noise"></div>
@@ -18,6 +18,21 @@
         <div><strong>OpsGuard</strong><small>SELF-RAG INCIDENT COPILOT</small></div>
       </a>
 
+      <!-- ─── Private Workspace Status ───────────────────────────── -->
+      <div class="workspace-chip">
+        <div class="workspace-chip-top">
+          <span class="user-avatar-dot"></span>
+          <div class="workspace-chip-info">
+            <span class="workspace-chip-label">ISOLATED WORKSPACE</span>
+            <span class="workspace-chip-id" id="workspaceChipId" title="Your unique private workspace ID">usr_loading...</span>
+          </div>
+        </div>
+        <div class="workspace-chip-actions">
+          <button type="button" id="copyWorkspaceBtn" class="workspace-action-btn" title="Copy Workspace ID">📋 Copy</button>
+          <button type="button" id="switchWorkspaceBtn" class="workspace-action-btn" title="Switch or create new workspace">⇄ Switch</button>
+        </div>
+      </div>
+
       <div class="rail-label">CONTROL CENTER</div>
       <nav class="nav">
         <button class="nav-item active" data-view="copilot" id="navCopilot"><span>◈</span> Incident Copilot</button>
@@ -26,9 +41,9 @@
       </nav>
 
       <section class="upload-panel">
-        <div class="eyebrow">PRIVATE KNOWLEDGE</div>
+        <div class="eyebrow">WORKSPACE KNOWLEDGE</div>
         <h3>Runbook Vault</h3>
-        <p>Upload and append SOPs, postmortems, architecture notes and troubleshooting guides to the existing Pinecone knowledge base.</p>
+        <p>Upload private SOPs, architecture notes and incident playbooks. Stored in your isolated workspace namespace.</p>
         <input id="fileInput" type="file" accept=".pdf,.txt,.md,.docx" multiple style="display:none;" />
         <label class="dropzone" for="fileInput">
           <span class="upload-icon">⇧</span>
@@ -218,6 +233,45 @@
     </div>
   </div>
 
-  <script src="/static/app.js?v=7"></script>
+  <!-- ─── Workspace Switcher Modal ────────────────────────────────────── -->
+  <div id="workspaceModal" class="audit-modal-backdrop" style="display: none;">
+    <div class="audit-modal-card workspace-modal-box">
+      <div class="audit-modal-header">
+        <div>
+          <div class="eyebrow">MULTI-TENANT ISOLATION</div>
+          <h3>Private Workspace Session</h3>
+        </div>
+        <button id="closeWorkspaceModalBtn" class="modal-close-btn">&times;</button>
+      </div>
+      <div class="workspace-modal-body">
+        <p class="workspace-modal-desc">
+          OpsGuard provides <strong>strict multi-tenant isolation</strong>. Every user gets a private workspace where uploaded runbooks, vector embeddings, incident memory, and audit trails are completely segregated. No other user can access your data.
+        </p>
+
+        <div class="workspace-token-display">
+          <label>Your Active Workspace Token</label>
+          <div class="workspace-token-row">
+            <input type="text" id="modalCurrentToken" readonly />
+            <button type="button" id="modalCopyTokenBtn" class="refresh-btn">Copy</button>
+          </div>
+          <small class="text-muted">Save this token to access your private runbooks and chat memory from another browser or device.</small>
+        </div>
+
+        <div class="workspace-switch-form">
+          <label for="switchTokenInput">Switch to an Existing Workspace</label>
+          <div class="workspace-token-row">
+            <input type="text" id="switchTokenInput" placeholder="Paste workspace token (e.g. usr_...)" />
+            <button type="button" id="confirmSwitchBtn" class="refresh-btn">Connect</button>
+          </div>
+        </div>
+
+        <div class="workspace-modal-actions">
+          <button type="button" id="createNewWorkspaceBtn" class="action-btn-danger">Create New Clean Workspace</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <script src="/static/app.js?v=8"></script>
 </body>
 </html>

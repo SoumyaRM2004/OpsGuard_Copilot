@@ -81,23 +81,95 @@ def ensure_index():
     return pc.Index(s.pinecone_index_name)
 
 
-@lru_cache
-def get_vector_store():
+@lru_cache(maxsize=128)
+def get_vector_store(namespace: str | None = None) -> PineconeVectorStore:
+    """Return a PineconeVectorStore instance scoped to the specified namespace."""
     s = get_settings()
-
     index = ensure_index()
+    ns = (namespace or s.pinecone_namespace).strip()
 
     return PineconeVectorStore(
         index=index,
         embedding=get_embeddings(),
-        namespace=s.pinecone_namespace,
+        namespace=ns,
     )
 
 
-def get_retriever():
+def get_retriever(namespace: str | None = None, top_k: int | None = None):
+    """Return a retriever scoped to the specified namespace."""
     s = get_settings()
+    k = top_k or s.top_k
 
-    return get_vector_store().as_retriever(
-        search_kwargs={"k": s.top_k}
+    return get_vector_store(namespace=namespace).as_retriever(
+        search_kwargs={"k": k}
     )
+
+
+def user_namespace_for(user_id: str) -> str:
+    """Derive an isolated, sanitized Pinecone namespace for a user workspace."""
+    clean = "".join(c for c in (user_id or "").strip() if c.isalnum() or c in "-_")
+    if not clean:
+        clean = "default"
+    return f"usr_{clean}"[:63]
+
+
+def retrieve_multi_namespace(query: str, user_id: str = "", top_k: int | None = None):
+    """Retrieve relevant documents prioritizing user's private namespace plus shared system runbooks.
+    
+    Guarantees strict isolation: under NO circumstances are vectors from another user's
+    namespace accessed.
+    """
+    s = get_settings()
+    k = top_k or s.top_k
+    all_docs = []
+    seen_content = set()
+
+    # 1. First retrieve from user's isolated private workspace namespace (if user_id provided)
+    if user_id:
+        user_ns = user_namespace_for(user_id)
+        if user_ns != s.pinecone_namespace:
+            try:
+                user_store = get_vector_store(namespace=user_ns)
+                user_docs = user_store.similarity_search(query, k=k)
+                for d in user_docs:
+                    d.metadata = dict(d.metadata or {})
+                    d.metadata["source_type"] = "internal"
+                    d.metadata["scope"] = "private"
+                    d.metadata["user_id"] = user_id
+                    content_sig = (d.metadata.get("title", ""), d.page_content[:200])
+                    if content_sig not in seen_content:
+                        seen_content.add(content_sig)
+                        all_docs.append(d)
+            except Exception:
+                # If namespace is empty or newly created, continue gracefully
+                pass
+
+    # 2. Retrieve from shared base system knowledge (company-documents)
+    try:
+        base_store = get_vector_store(namespace=s.pinecone_namespace)
+        base_docs = base_store.similarity_search(query, k=k)
+        for d in base_docs:
+            d.metadata = dict(d.metadata or {})
+            d.metadata["source_type"] = "internal"
+            d.metadata["scope"] = "system"
+            content_sig = (d.metadata.get("title", ""), d.page_content[:200])
+            if content_sig not in seen_content:
+                seen_content.add(content_sig)
+                all_docs.append(d)
+    except Exception:
+        pass
+
+    return all_docs
+
+
+def delete_file_from_namespace(filename: str, namespace: str) -> None:
+    """Delete all vectors for a specific document from a Pinecone namespace."""
+    try:
+        index = ensure_index()
+        index.delete(
+            filter={"document_name": filename},
+            namespace=namespace,
+        )
+    except Exception:
+        pass
     

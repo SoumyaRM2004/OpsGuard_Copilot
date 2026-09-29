@@ -34,6 +34,7 @@ class RAGState(TypedDict, total=False):
     source_mode: Literal["internal", "web", "direct", "none"]
     used_web_search: bool
     trace: List[str]
+    user_id: str
 
 
 class RetrieveDecision(BaseModel):

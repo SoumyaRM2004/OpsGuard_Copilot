@@ -13,6 +13,7 @@ def init_db() -> None:
         conn.execute("""
         CREATE TABLE IF NOT EXISTS rag_audit (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
+            user_id TEXT NOT NULL DEFAULT 'public',
             created_at TEXT NOT NULL,
             question TEXT NOT NULL,
             answer TEXT NOT NULL,
@@ -24,17 +25,26 @@ def init_db() -> None:
             sources_json TEXT
         )
         """)
+        # Auto-migration: check if user_id column is present on existing database
+        cursor = conn.execute("PRAGMA table_info(rag_audit)")
+        columns = [row[1] for row in cursor.fetchall()]
+        if "user_id" not in columns:
+            conn.execute("ALTER TABLE rag_audit ADD COLUMN user_id TEXT NOT NULL DEFAULT 'public'")
+
+        conn.execute("CREATE INDEX IF NOT EXISTS idx_audit_user_id ON rag_audit(user_id)")
         conn.commit()
 
 
-def save_audit(question: str, result: dict) -> None:
+def save_audit(user_id: str, question: str, result: dict) -> None:
     path = get_settings().database_file
+    uid = (user_id or "public").strip()
     with sqlite3.connect(path) as conn:
         conn.execute(
             """INSERT INTO rag_audit
-            (created_at, question, answer, route, used_web, support_status, usefulness, trace_json, sources_json)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+            (user_id, created_at, question, answer, route, used_web, support_status, usefulness, trace_json, sources_json)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
             (
+                uid,
                 datetime.now(timezone.utc).isoformat(),
                 question,
                 result.get("answer", ""),
@@ -49,11 +59,13 @@ def save_audit(question: str, result: dict) -> None:
         conn.commit()
 
 
-def latest_audits(limit: int = 25):
+def latest_audits(user_id: str = "", limit: int = 50):
     path = get_settings().database_file
+    uid = (user_id or "public").strip()
     with sqlite3.connect(path) as conn:
         conn.row_factory = sqlite3.Row
         rows = conn.execute(
-            "SELECT * FROM rag_audit ORDER BY id DESC LIMIT ?", (limit,)
+            "SELECT * FROM rag_audit WHERE user_id = ? ORDER BY id DESC LIMIT ?",
+            (uid, limit),
         ).fetchall()
     return [dict(r) for r in rows]

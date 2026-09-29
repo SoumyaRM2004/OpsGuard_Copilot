@@ -13,8 +13,7 @@ from langchain_core.prompts import ChatPromptTemplate
 from langchain_core.output_parsers import StrOutputParser
 from tavily import TavilyClient
 
-from src.config import get_settings
-from src.vectorstore import get_retriever
+from src.vectorstore import get_retriever, retrieve_multi_namespace
 from src.llm import get_llm, get_fast_llm
 from src.rag_state import (
     RAGState,
@@ -302,14 +301,15 @@ def generate_direct(state: RAGState):
 
 
 def retrieve_internal(state: RAGState):
-    """Fetch relevant chunks from the Pinecone vector store."""
+    """Fetch relevant chunks from the Pinecone vector store, prioritizing user workspace documents."""
     t0 = time.perf_counter()
     q = (
         state.get("retrieval_query")
         or state["question"]
     )
+    user_id = state.get("user_id", "")
 
-    docs = get_retriever().invoke(q)
+    docs = retrieve_multi_namespace(q, user_id=user_id)
 
     for d in docs:
         d.metadata = {
@@ -318,13 +318,21 @@ def retrieve_internal(state: RAGState):
         }
     dt = time.perf_counter() - t0
 
+    user_count = sum(1 for d in docs if (d.metadata or {}).get("scope") == "private")
+    base_count = len(docs) - user_count
+    trace_label = (
+        f"Internal retrieval: {len(docs)} chunks ({user_count} private runbooks, {base_count} system) ({dt:.2f}s)"
+        if user_id
+        else f"Internal retrieval: {len(docs)} chunks ({dt:.2f}s)"
+    )
+
     return {
         "docs": docs,
         "relevant_docs": [],
         "source_mode": "internal",
         "trace": _trace(
             state,
-            f"Internal retrieval: {len(docs)} chunks ({dt:.2f}s)"
+            trace_label
         )
     }
 
