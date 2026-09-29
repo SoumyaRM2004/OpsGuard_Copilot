@@ -1,41 +1,57 @@
-from pathlib import Path
+"""FastAPI application — endpoints for Self-RAG chat, document upload, and audit trail."""
+
+import logging
 import shutil
+from contextlib import asynccontextmanager
+from pathlib import Path
 from typing import List
+
 from fastapi import FastAPI, Request, UploadFile, File, HTTPException
 from fastapi.responses import HTMLResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 from fastapi.concurrency import run_in_threadpool
+from dotenv import load_dotenv
 
-
-from src.models import ChatRequest, ChatResponse, UploadResponse
+from src.models import ChatRequest, ChatResponse
 from src.self_rag import run_self_rag
 from src.ingestion import ingest_file, namespace, SUPPORTED
 from src.db import init_db, save_audit, latest_audits
-from dotenv import load_dotenv
+from src.vectorstore import get_vector_store
 
-load_dotenv()  # Load environment variables from .env file
+
+load_dotenv()
+
+logger = logging.getLogger(__name__)
 
 ROOT = Path(__file__).resolve().parent
 UPLOADS = ROOT / "uploads"
 UPLOADS.mkdir(exist_ok=True)
 
 
+# ─── Lifespan (replaces deprecated @app.on_event) ───────────────────
+
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    """Startup: initialize database and vector store."""
+    init_db()
+    get_vector_store()
+    logger.info("OpsGuard ready — http://localhost:8080")
+    yield
+
+
 app = FastAPI(
     title="OpsGuard — Enterprise Incident Response Self-RAG Copilot",
     version="2.0.0",
-    description="Self-RAG copilot for cloud operations, production troubleshooting, and incident-response runbooks.",
+    description="Self-RAG copilot for cloud operations and incident response.",
+    lifespan=lifespan,
 )
 app.mount("/static", StaticFiles(directory=str(ROOT / "static")), name="static")
 templates = Jinja2Templates(directory=str(ROOT / "templates"))
 
 
-
-@app.on_event("startup")
-def startup():
-    init_db()
-    print("\n  Local:   http://localhost:8080")
-    print("  Network: http://127.0.0.1:8080\n")
+# ─── Routes ──────────────────────────────────────────────────────────
 
 
 @app.get("/", response_class=HTMLResponse)
@@ -58,8 +74,12 @@ async def chat(payload: ChatRequest):
         result = await run_in_threadpool(run_self_rag, payload.question.strip(), payload.thread_id.strip())
         await run_in_threadpool(save_audit, payload.question, result)
         return ChatResponse(**result)
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+    except Exception:
+        logger.exception("Chat endpoint error")
+        raise HTTPException(status_code=500, detail="An internal error occurred. Please try again.")
+
+
+# ─── File Upload ─────────────────────────────────────────────────────
 
 
 MAX_FILE_SIZE = 20 * 1024 * 1024  # 20 MB limit per document
@@ -78,17 +98,15 @@ def _get_file_size(upload_file: UploadFile) -> int:
 @app.post("/api/upload")
 async def upload(
     files: List[UploadFile] = File(default=[]),
-    file: List[UploadFile] = File(default=[]),
 ):
-    upload_files = list(files) + list(file)
-    if not upload_files:
+    if not files:
         raise HTTPException(status_code=400, detail="No files uploaded.")
 
     results = []
     total_chunks = 0
     current_namespace = namespace()
 
-    for uf in upload_files:
+    for uf in files:
         safe_name = Path(uf.filename or "unnamed").name
         suffix = Path(safe_name).suffix.lower()
 
@@ -129,13 +147,14 @@ async def upload(
                 "namespace": current_namespace,
                 "status": "success",
             })
-        except Exception as e:
+        except Exception:
+            logger.exception("Failed to ingest file: %s", safe_name)
             results.append({
                 "filename": safe_name,
                 "chunks_indexed": 0,
                 "namespace": current_namespace,
                 "status": "error",
-                "error": str(e),
+                "error": f"Failed to process '{safe_name}'. Please try again or use a different file format.",
             })
 
     errors = [r["error"] for r in results if r.get("status") == "error"]
@@ -143,13 +162,13 @@ async def upload(
         raise HTTPException(status_code=400, detail="; ".join(errors))
 
     response_data = {
-        "total_files": len(upload_files),
+        "total_files": len(files),
         "chunks_indexed": total_chunks,
         "namespace": current_namespace,
         "results": results,
         "files": results,
     }
-    if len(upload_files) == 1 and results:
+    if len(files) == 1 and results:
         response_data["filename"] = results[0]["filename"]
 
     return response_data

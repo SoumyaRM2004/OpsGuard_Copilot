@@ -1,3 +1,5 @@
+"""SQLite audit trail — stores every Q&A for compliance logging."""
+
 import json
 import sqlite3
 from datetime import datetime, timezone

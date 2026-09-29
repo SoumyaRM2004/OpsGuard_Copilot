@@ -1,3 +1,5 @@
+"""Pinecone vector store initialization and retriever factory."""
+
 from functools import lru_cache
 
 from pinecone import Pinecone

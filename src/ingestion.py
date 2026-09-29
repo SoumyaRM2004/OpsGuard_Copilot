@@ -1,28 +1,29 @@
+"""Document loading, chunking, and Pinecone vector ingestion."""
+
 from pathlib import Path
 from typing import List
 from hashlib import sha256
-from langchain_community.document_loaders import PyPDFLoader, TextLoader, UnstructuredMarkdownLoader, UnstructuredWordDocumentLoader
+from langchain_community.document_loaders import PyPDFLoader, TextLoader
 from langchain_text_splitters import RecursiveCharacterTextSplitter
 from langchain_core.documents import Document
 from docx import Document as DocxDocument
 from src.config import get_settings
 from src.vectorstore import get_vector_store
 
-SUPPORTED = {
-    ".pdf": PyPDFLoader,
-    ".txt": TextLoader,
-    ".md": UnstructuredMarkdownLoader,
-    ".docx": UnstructuredWordDocumentLoader
-}
+
+# File extensions this pipeline can process.
+SUPPORTED = {".pdf", ".txt", ".md", ".docx"}
 
 
 def _load_docx(path: Path) -> List[Document]:
+    """Load a .docx file into a single LangChain Document."""
     doc = DocxDocument(path)
     text = "\n".join(p.text for p in doc.paragraphs if p.text.strip())
     return [Document(page_content=text, metadata={"source": str(path), "title": path.name})]
-  
+
 
 def load_file(path: Path) -> List[Document]:
+    """Load a single file into LangChain Documents based on its extension."""
     ext = path.suffix.lower()
     if ext == ".pdf":
         docs = PyPDFLoader(str(path)).load()
@@ -40,16 +41,16 @@ def load_file(path: Path) -> List[Document]:
     return docs
 
 
-
 def _stable_chunk_id(path: Path, chunk: Document, position: int) -> str:
     """Stable IDs make repeat ingestion idempotent instead of creating duplicates."""
     material = f"{path.name}|{position}|{chunk.page_content}".encode("utf-8")
     digest = sha256(material).hexdigest()[:24]
     safe_stem = "".join(c if c.isalnum() or c in "-_" else "-" for c in path.stem)[:60]
     return f"{safe_stem}-{position}-{digest}"
-  
+
 
 def ingest_file(path: Path) -> int:
+    """Load, chunk, and upsert a single file into Pinecone. Returns chunk count."""
     docs = load_file(path)
     splitter = RecursiveCharacterTextSplitter(
         chunk_size=800,
@@ -65,9 +66,10 @@ def ingest_file(path: Path) -> int:
     ids = [_stable_chunk_id(path, chunk, i) for i, chunk in enumerate(chunks)]
     get_vector_store().add_documents(chunks, ids=ids)
     return len(chunks)
-  
-  
+
+
 def ingest_directory(directory: Path) -> int:
+    """Ingest all supported files in a directory. Returns total chunk count."""
     total = 0
     if not directory.exists():
         return 0
@@ -77,6 +79,6 @@ def ingest_directory(directory: Path) -> int:
     return total
 
 
-
 def namespace() -> str:
+    """Return the current Pinecone namespace from settings."""
     return get_settings().pinecone_namespace

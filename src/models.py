@@ -1,9 +1,13 @@
+"""Pydantic request/response models for the FastAPI endpoints."""
+
 from pydantic import BaseModel, Field
 from typing import List, Optional, Literal
+
 
 class ChatRequest(BaseModel):
     question: str = Field(..., min_length=2, max_length=2000)
     thread_id: str = Field(..., min_length=3, max_length=120)
+
 
 class SourceItem(BaseModel):
     type: Literal["internal", "web"]
@@ -11,6 +15,7 @@ class SourceItem(BaseModel):
     source: str = ""
     url: Optional[str] = None
     page: Optional[int] = None
+
 
 class ChatResponse(BaseModel):
     answer: str
@@ -22,11 +27,3 @@ class ChatResponse(BaseModel):
     trace: List[str] = []
     thread_id: str
     memory_turns: int = 0
-
-class UploadResponse(BaseModel):
-    filename: str
-    chunks_indexed: int
-    namespace: str
-    
-    
-

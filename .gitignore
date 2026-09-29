@@ -68,6 +68,9 @@ htmlcov/
 # Logs
 *.log
 
+# Development notebooks (experiment scratch, not production code)
+self_rag/
+
 # OS generated files
 .DS_Store
 Thumbs.db
