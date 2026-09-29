@@ -85,12 +85,6 @@ The core architecture combines FastAPI, LangGraph Self-RAG agent workflow, Pinec
 
 The production Self-RAG engine (`src/self_rag.py`, prototyped in `self_rag/self_rag_final.ipynb`) is compiled as a cyclical state machine with persistent incident memory:
 
-<p align="center">
-  <img src="pictures/self_rag_final_workflow.png" alt="OpsGuard Self-RAG StateGraph Workflow" width="560" />
-</p>
-
-### Interactive StateGraph Mermaid Diagram
-
 ```mermaid
 graph TD
     __start__([__start__]) --> decide_retrieval(decide_retrieval)
