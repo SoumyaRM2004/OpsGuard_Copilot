@@ -472,12 +472,22 @@ let auditsCache = [];
 
 async function loadAudits() {
   const tbody = document.getElementById('auditTableBody');
-  if (!tbody) return;
+  const refreshBtn = document.getElementById('refreshAuditsBtn');
+  if (refreshBtn) {
+    refreshBtn.disabled = true;
+    refreshBtn.innerHTML = '<span class="spin-icon">↻</span> Refreshing…';
+  }
 
-  tbody.innerHTML = '<tr><td colspan="6" class="loading-cell">Loading audit trail records…</td></tr>';
+  if (tbody && (!auditsCache || auditsCache.length === 0)) {
+    tbody.innerHTML = '<tr><td colspan="6" class="loading-cell">Loading audit trail records…</td></tr>';
+  }
 
   try {
-    const res = await fetch('/api/audits?limit=50');
+    const res = await fetch('/api/audits?limit=50&_t=' + Date.now(), {
+      cache: 'no-store',
+      headers: { 'Pragma': 'no-cache', 'Cache-Control': 'no-cache' }
+    });
+    if (!res.ok) throw new Error(`HTTP ${res.status}: Failed to fetch audit records`);
     const data = await res.json();
     auditsCache = data || [];
 
@@ -499,8 +509,25 @@ async function loadAudits() {
     if (verifiedEl) verifiedEl.textContent = `${verifiedPct}%`;
 
     filterAndRenderAudits();
+
+    if (refreshBtn) {
+      refreshBtn.innerHTML = `✓ Refreshed (${total})`;
+      setTimeout(() => {
+        refreshBtn.innerHTML = '↻ Refresh Logs';
+        refreshBtn.disabled = false;
+      }, 1200);
+    }
   } catch (err) {
-    tbody.innerHTML = `<tr><td colspan="6" class="empty-cell">Error loading audit records: ${escapeHtml(err.message)}</td></tr>`;
+    if (tbody) {
+      tbody.innerHTML = `<tr><td colspan="6" class="empty-cell">Error loading audit records: ${escapeHtml(err.message)}</td></tr>`;
+    }
+    if (refreshBtn) {
+      refreshBtn.innerHTML = '⚠ Refresh Failed';
+      setTimeout(() => {
+        refreshBtn.innerHTML = '↻ Refresh Logs';
+        refreshBtn.disabled = false;
+      }, 2000);
+    }
   }
 }
 

@@ -7,7 +7,7 @@ from pathlib import Path
 from typing import List
 
 from fastapi import FastAPI, Request, UploadFile, File, HTTPException
-from fastapi.responses import HTMLResponse
+from fastapi.responses import HTMLResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 from fastapi.concurrency import run_in_threadpool
@@ -184,7 +184,15 @@ async def upload(
 
 @app.get("/api/audits")
 def audits(limit: int = 50):
-    return latest_audits(min(max(limit, 1), 100))
+    data = latest_audits(min(max(limit, 1), 100))
+    return JSONResponse(
+        content=data,
+        headers={
+            "Cache-Control": "no-cache, no-store, must-revalidate",
+            "Pragma": "no-cache",
+            "Expires": "0",
+        },
+    )
 
 
 @app.get("/api/runbooks")

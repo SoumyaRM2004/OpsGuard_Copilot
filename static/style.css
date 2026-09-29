@@ -858,6 +858,16 @@ button, textarea, input {
 
 /* ─── Multi-View Panes ───────────────────────────────────────────── */
 
+@keyframes spin {
+  from { transform: rotate(0deg); }
+  to { transform: rotate(360deg); }
+}
+
+.spin-icon {
+  display: inline-block;
+  animation: spin 0.75s linear infinite;
+}
+
 .view-pane {
   display: none;
   flex-direction: column;
