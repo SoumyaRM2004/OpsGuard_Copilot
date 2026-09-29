@@ -83,43 +83,58 @@ The core architecture combines FastAPI, LangGraph Self-RAG agent workflow, Pinec
 
 ## 🔄 LangGraph Decision Flow (StateGraph Breakdown)
 
-The core engine is structured as a cyclical directed graph compiled with `SqliteSaver` checkpointer:
+The production Self-RAG engine (`src/self_rag.py`, prototyped in `self_rag/self_rag_final.ipynb`) is compiled as a cyclical state machine with persistent incident memory:
+
+<p align="center">
+  <img src="pictures/self_rag_final_workflow.png" alt="OpsGuard Self-RAG StateGraph Workflow" width="560" />
+</p>
+
+### Interactive StateGraph Mermaid Diagram
 
 ```mermaid
-flowchart TD
-    START([START]) --> contextualize[Node: contextualize_question\nMerge Multi-Turn SQLite Memory]
-    contextualize --> decide_retrieval{Node: decide_retrieval\nNeed Internal Retrieval?}
-    
-    decide_retrieval -- FALSE: Generic Technical Query --> direct[Node: generate_direct\nGeneral Technical Answer]
-    direct --> commit_memory[Node: commit_memory\nUpdate SQLite Checkpointer]
-    
-    decide_retrieval -- TRUE: Operational Incident --> retrieve[Node: retrieve_internal\nPinecone Vector Search]
-    retrieve --> grade{Node: grade_relevance\nGrade Internal Chunks}
-    
-    grade -- Evidence Found --> generate[Node: generate_from_context\nSynthesize Incident Response]
-    
-    grade -- No Relevant Evidence & Retries < 5 --> rewrite_internal[Node: rewrite_internal_query\nOptimize Search Terms]
-    rewrite_internal --> retrieve
-    
-    grade -- Internal Exhausted & Retries >= 5 --> rewrite_web[Node: rewrite_web_query\nCraft Internet Search Query]
-    rewrite_web --> web_search[Node: web_search\nTavily Search Engine]
-    web_search --> grade
-    
-    generate --> support{Node: check_support (IsSUP)\nAudit Hallucinations}
-    
-    support -- Unsupported & Retries < 5 --> revise[Node: revise_answer\nStrip Unsupported Claims]
-    revise --> support
-    
-    support -- Fully Supported or Retries Exhausted --> usefulness{Node: check_usefulness (IsUSE)\nDoes Answer Address Incident?}
-    
-    usefulness -- Useful --> commit_memory
-    usefulness -- Not Useful & Internal Mode --> rewrite_internal
-    usefulness -- Not Useful & Web Mode --> rewrite_web
-    usefulness -- Exhausted All Attempts --> no_answer[Node: no_answer\nSafe Fallback Notification]
-    
-    no_answer --> commit_memory
-    commit_memory --> END([END: Stream Response to Incident Console])
+graph TD
+    __start__([__start__]) --> decide_retrieval(decide_retrieval)
+    decide_retrieval -.-> generate_direct(generate_direct)
+    decide_retrieval -.-> retrieve(retrieve)
+
+    retrieve --> is_relevant(is_relevant)
+
+    is_relevant -.-> generate_from_context(generate_from_context)
+    is_relevant -.-> rewrite_question(rewrite_question)
+    is_relevant -.-> no_answer_found(no_answer_found)
+
+    generate_from_context --> is_sup(is_sup)
+
+    is_sup -. "accept_answer" .-> is_use(is_use)
+    is_sup -.-> revise_answer(revise_answer)
+    revise_answer --> is_sup
+
+    is_use -. "END" .-> __end__([__end__])
+    is_use -.-> rewrite_question
+    is_use -.-> no_answer_found
+
+    rewrite_question --> retrieve
+
+    generate_direct --> __end__
+    no_answer_found --> __end__
 ```
+
+### StateGraph Node Breakdown & Lifecycle
+
+| Node | Purpose & Self-Reflection Functionality |
+| :--- | :--- |
+| **`__start__`** | Entry-point accepting incoming incident query, scoped user workspace ID, and thread context. |
+| **`decide_retrieval`** | **Routing Gate**: Analyzes whether question requires internal runbooks/evidence or standard direct LLM guidance. |
+| **`retrieve`** | **Multi-Tenant Vector Search**: Queries user's private workspace namespace (`usr_<id>`) and shared system playbooks. |
+| **`is_relevant`** | **Relevance Grader**: Filters candidate chunks; if sufficient evidence exists, routes to generation; otherwise triggers query rewriting or safe fallback. |
+| **`generate_from_context`** | **Evidence Synthesis**: Synthesizes actionable incident guidance strictly grounded in verified documentation. |
+| **`is_sup`** | **Hallucination Grader (`IsSUP`)**: Audits every statement in the draft against cited sources. If supported, marks `accept_answer`; if unsupported, triggers revision. |
+| **`revise_answer`** | **Self-Correction Loop**: Strips ungrounded claims and rewrites answer, cycling back to `is_sup` until validated. |
+| **`is_use`** | **Solution Utility Grader (`IsUSE`)**: Evaluates whether the answer directly solves the user's operational issue. If useful, transitions to `END`. |
+| **`rewrite_question`** | **Cyclical Query Optimizer**: Reformulates technical search keywords and loops back to `retrieve` for better vector alignment. |
+| **`no_answer_found`** | **Fail-Safe Gate**: Returns a safe notification when evidence is absent, strictly preventing speculative commands. |
+| **`generate_direct`** | **Direct Generation**: Supplies concise technical definitions without redundant vector database retrieval. |
+| **`__end__`** | Streams verified response, sources, routing badges, and trace steps to the Incident Command Center. |
 
 ---
 
